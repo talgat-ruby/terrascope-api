@@ -1,0 +1,23 @@
+[project]
+name = "terrascope-cli"
+version = "0.1.0"
+description = "Terrascope CLI tool"
+requires-python = ">=3.14"
+dependencies = [
+    "terrascope-core",
+    "typer[all]>=0.15",
+    "temporalio>=1.9",
+]
+
+[project.scripts]
+terrascope = "cli.main:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cli"]
+
+[tool.uv.sources]
+terrascope-core = { workspace = true }

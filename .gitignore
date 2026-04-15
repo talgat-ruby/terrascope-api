@@ -8,3 +8,20 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Environment
+.env
+
+# Data & outputs
+data/
+output/
+uploads/
+*.tif
+*.tiff
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store

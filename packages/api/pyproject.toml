@@ -1,0 +1,20 @@
+[project]
+name = "terrascope-api"
+version = "0.1.0"
+description = "Terrascope FastAPI application"
+requires-python = ">=3.14"
+dependencies = [
+    "terrascope-core",
+    "fastapi[standard]>=0.135",
+    "temporalio>=1.9",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/api"]
+
+[tool.uv.sources]
+terrascope-core = { workspace = true }
