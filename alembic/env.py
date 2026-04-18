@@ -7,7 +7,7 @@ from sqlalchemy import engine_from_config, pool
 from sqlmodel import SQLModel
 
 # Import all models so they register with SQLModel.metadata
-from core.models import (
+from core.models import (  # noqa: F401
     Detection,
     ProcessingJob,
     QualityMetrics,

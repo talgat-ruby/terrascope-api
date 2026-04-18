@@ -1,7 +1,7 @@
 import uuid
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
-from fastapi import APIRouter, UploadFile
+from fastapi import APIRouter, HTTPException, UploadFile
 
 from core.config import settings
 from core.services.stac import StacService
@@ -13,7 +13,8 @@ router = APIRouter()
 async def upload_imagery(file: UploadFile) -> dict:
     settings.upload_dir.mkdir(parents=True, exist_ok=True)
     file_id = uuid.uuid4()
-    dest = settings.upload_dir / f"{file_id}_{file.filename}"
+    suffix = PurePosixPath(file.filename or "upload").suffix
+    dest = settings.upload_dir / f"{file_id}{suffix}"
     content = await file.read()
     dest.write_bytes(content)
     return {
@@ -68,7 +69,7 @@ async def stac_download(
     )
     item = next((i for i in items if i.id == item_id), None)
     if item is None:
-        return {"status": "error", "message": f"Item {item_id} not found"}
+        raise HTTPException(status_code=404, detail=f"STAC item {item_id} not found")
 
     dest = Path(output_dir) if output_dir else settings.upload_dir
     downloaded_path = await stac.download(item, dest, asset_key=asset_key)

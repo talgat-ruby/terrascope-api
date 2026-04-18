@@ -2,6 +2,7 @@
 
 import csv
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -31,7 +32,7 @@ class IndicatorCalculatorService:
     def compute(
         self,
         detections: list[RawDetection],
-        zones: dict[str, BaseGeometry],
+        zones: Mapping[str, BaseGeometry],
     ) -> list[ZoneIndicatorResult]:
         """Compute per-zone, per-class indicators via spatial intersection.
 

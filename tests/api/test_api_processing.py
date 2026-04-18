@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -32,6 +32,8 @@ def _make_job(
 @pytest.fixture
 def mock_db():
     session = AsyncMock()
+    session.add = MagicMock()
+    session.add_all = MagicMock()
 
     async def _get_db():
         yield session

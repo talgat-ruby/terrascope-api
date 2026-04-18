@@ -27,6 +27,12 @@ async def postprocess(job_id: str) -> dict:
     """Apply NMS, filtering, and deduplication to detections."""
     async with async_session_factory() as session:
         job = await get_job(session, job_id)
+
+        # Idempotency guard: skip if already completed
+        if job.checkpoint_data and "postprocess" in job.checkpoint_data:
+            cached = job.checkpoint_data["postprocess"]
+            return {"status": "postprocessed", "job_id": job_id, "stats": cached}
+
         await update_job(
             session,
             job,
@@ -37,7 +43,7 @@ async def postprocess(job_id: str) -> dict:
         try:
             # Load raw detections from DB
             result = await session.execute(
-                select(Detection).where(Detection.job_id == job.id)
+                select(Detection).where(Detection.job_id == job.id)  # type: ignore[arg-type]
             )
             db_detections = list(result.scalars().all())
             raw_detections = detections_to_raw(db_detections)
@@ -68,7 +74,7 @@ async def postprocess(job_id: str) -> dict:
             )
 
             # Delete old detections and insert filtered ones
-            await session.execute(delete(Detection).where(Detection.job_id == job.id))
+            await session.execute(delete(Detection).where(Detection.job_id == job.id))  # type: ignore[arg-type]
             geod = Geod(ellps="WGS84")
             new_detections = raw_to_detections(filtered, str(job.id), geod)
             session.add_all(new_detections)

@@ -2,12 +2,10 @@ import uuid
 
 from core.models import (
     CLASS_REGISTRY,
-    Detection,
     JobStatus,
     ProcessingJob,
     QualityMetrics,
     Territory,
-    Tile,
     ZoneIndicator,
 )
 

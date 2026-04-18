@@ -1,13 +1,29 @@
 from datetime import timedelta
 
 from temporalio import workflow
+from temporalio.common import RetryPolicy
 
 with workflow.unsafe.imports_passed_through():
+    from worker.activities._helpers import finalize_job
     from worker.activities.detection import detect_objects
     from worker.activities.export import export_results
     from worker.activities.imagery import load_imagery, tile_imagery
     from worker.activities.indicators import compute_indicators
     from worker.activities.postprocessing import postprocess
+
+_default_retry = RetryPolicy(
+    initial_interval=timedelta(seconds=1),
+    backoff_coefficient=2.0,
+    maximum_interval=timedelta(seconds=60),
+    maximum_attempts=3,
+)
+
+_ml_retry = RetryPolicy(
+    initial_interval=timedelta(seconds=2),
+    backoff_coefficient=2.0,
+    maximum_interval=timedelta(seconds=120),
+    maximum_attempts=5,
+)
 
 
 @workflow.defn
@@ -19,6 +35,7 @@ class ProcessingWorkflow:
             load_imagery,
             job_id,
             start_to_close_timeout=timedelta(minutes=10),
+            retry_policy=_default_retry,
         )
 
         # Step 2: Tile the imagery
@@ -26,6 +43,7 @@ class ProcessingWorkflow:
             tile_imagery,
             job_id,
             start_to_close_timeout=timedelta(minutes=10),
+            retry_policy=_default_retry,
         )
 
         # Step 3: Run ML detection on tiles
@@ -33,6 +51,7 @@ class ProcessingWorkflow:
             detect_objects,
             job_id,
             start_to_close_timeout=timedelta(minutes=60),
+            retry_policy=_ml_retry,
         )
 
         # Step 4: Post-process detections
@@ -40,6 +59,7 @@ class ProcessingWorkflow:
             postprocess,
             job_id,
             start_to_close_timeout=timedelta(minutes=10),
+            retry_policy=_default_retry,
         )
 
         # Step 5: Export results to GIS formats
@@ -47,6 +67,7 @@ class ProcessingWorkflow:
             export_results,
             job_id,
             start_to_close_timeout=timedelta(minutes=10),
+            retry_policy=_default_retry,
         )
 
         # Step 6: Compute zone indicators
@@ -54,6 +75,15 @@ class ProcessingWorkflow:
             compute_indicators,
             job_id,
             start_to_close_timeout=timedelta(minutes=10),
+            retry_policy=_default_retry,
+        )
+
+        # Step 7: Mark job as completed
+        await workflow.execute_activity(
+            finalize_job,
+            job_id,
+            start_to_close_timeout=timedelta(minutes=1),
+            retry_policy=_default_retry,
         )
 
         return {

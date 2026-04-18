@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
 from api.dependencies import get_db
+from core.config import settings
 from core.models.detection import Detection
 from core.models.indicator import ZoneIndicator
 from core.models.processing import JobStatus, ProcessingJob
@@ -61,7 +62,7 @@ async def get_detections(
                     "area_m2": d.area_m2,
                     "length_m": d.length_m,
                 },
-                "geometry": mapping(to_shape(d.geometry)) if d.geometry else None,
+                "geometry": mapping(to_shape(d.geometry)) if d.geometry else None,  # type: ignore[arg-type]
             }
             for d in detections
         ],
@@ -97,7 +98,9 @@ async def download_results(
             detail=f"Export format '{format}' not available",
         )
 
-    file_path = Path(file_path_str)
+    file_path = Path(file_path_str).resolve()
+    if not file_path.is_relative_to(settings.output_dir.resolve()):
+        raise HTTPException(status_code=400, detail="Invalid export path")
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Export file not found on disk")
 

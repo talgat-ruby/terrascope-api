@@ -5,8 +5,11 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import rasterio
+from matplotlib.axes import Axes
 from matplotlib.patches import Polygon as MplPolygon
+from matplotlib.patches import Rectangle
 from shapely.geometry import MultiPolygon, Polygon
+from shapely.geometry.base import BaseGeometry
 
 from core.services.detector import RawDetection
 
@@ -55,12 +58,12 @@ class VisualizationService:
         img = self._normalize_rgb(data)
 
         fig, ax = plt.subplots(1, 1, figsize=figsize)
-        extent = [
+        extent = (
             transform.c,
             transform.c + transform.a * img.shape[1],
             transform.f + transform.e * img.shape[0],
             transform.f,
-        ]
+        )
         ax.imshow(img, extent=extent, origin="upper")
 
         # Draw detections
@@ -76,7 +79,7 @@ class VisualizationService:
                 labels_seen.add(det.class_name)
                 color = CLASS_COLORS.get(det.class_name, "#ffffff")
                 handles.append(
-                    plt.Rectangle(
+                    Rectangle(
                         (0, 0), 1, 1, fc=color, alpha=alpha, label=det.class_name
                     )
                 )
@@ -124,8 +127,8 @@ class VisualizationService:
 
     def _draw_geometry(
         self,
-        ax: plt.Axes,
-        geometry: object,
+        ax: Axes,
+        geometry: BaseGeometry,
         color: str,
         alpha: float,
     ) -> None:
@@ -138,7 +141,7 @@ class VisualizationService:
 
     def _draw_polygon(
         self,
-        ax: plt.Axes,
+        ax: Axes,
         polygon: Polygon,
         color: str,
         alpha: float,

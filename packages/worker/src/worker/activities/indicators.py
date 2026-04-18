@@ -4,6 +4,8 @@ import asyncio
 import uuid
 
 from geoalchemy2.shape import to_shape
+from shapely.geometry.base import BaseGeometry
+from sqlalchemy import delete
 from sqlmodel import select
 from temporalio import activity
 
@@ -26,6 +28,16 @@ async def compute_indicators(job_id: str) -> dict:
     """Compute zone-level statistics and save to DB."""
     async with async_session_factory() as session:
         job = await get_job(session, job_id)
+
+        # Idempotency guard: skip if already completed
+        if job.checkpoint_data and "indicators" in job.checkpoint_data:
+            cached = job.checkpoint_data["indicators"]
+            return {
+                "status": "computed",
+                "job_id": job_id,
+                "indicator_count": cached["indicator_count"],
+            }
+
         await update_job(
             session,
             job,
@@ -49,10 +61,10 @@ async def compute_indicators(job_id: str) -> dict:
             result = await session.execute(stmt)
             territories = list(result.scalars().all())
 
-            zones: dict[str, object] = {}
+            zones: dict[str, BaseGeometry] = {}
             for territory in territories:
                 if territory.geometry is not None:
-                    zones[str(territory.id)] = to_shape(territory.geometry)
+                    zones[str(territory.id)] = to_shape(territory.geometry)  # type: ignore[arg-type]
 
             # Compute indicators
             calculator = IndicatorCalculatorService()
@@ -72,12 +84,16 @@ async def compute_indicators(job_id: str) -> dict:
                 )
                 for ind in indicators
             ]
+            # Delete any prior indicators for idempotency
+            await session.execute(
+                delete(ZoneIndicator).where(ZoneIndicator.job_id == job.id)  # type: ignore[arg-type]
+            )
             session.add_all(db_indicators)
 
             await update_job(
                 session,
                 job,
-                status=JobStatus.COMPLETED,
+                status=JobStatus.COMPUTING_INDICATORS,
                 current_step="compute_indicators",
                 checkpoint_update={
                     "indicators": {
@@ -85,7 +101,6 @@ async def compute_indicators(job_id: str) -> dict:
                         "indicator_count": len(indicators),
                     }
                 },
-                completed=True,
             )
 
             activity.logger.info(

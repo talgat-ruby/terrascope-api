@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -64,8 +64,10 @@ async def test_download_geojson(mock_db, tmp_path):
     app.dependency_overrides[get_db] = get_db_override
 
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.get(f"/results/{job.id}/download?format=geojson")
+    with patch("api.routers.results.settings") as mock_settings:
+        mock_settings.output_dir = tmp_path
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.get(f"/results/{job.id}/download?format=geojson")
 
     assert response.status_code == 200
     assert "geo+json" in response.headers.get("content-type", "")
@@ -105,11 +107,12 @@ async def test_download_incomplete_job(mock_db):
 
 
 @pytest.mark.asyncio
-async def test_download_missing_file(mock_db):
+async def test_download_missing_file(mock_db, tmp_path):
     session, get_db_override = mock_db
 
+    missing_path = tmp_path / "nonexistent" / "detections.geojson"
     job = _make_completed_job(
-        export_formats={"geojson": "/nonexistent/path/detections.geojson"}
+        export_formats={"geojson": str(missing_path)}
     )
 
     result_mock = MagicMock()
@@ -121,8 +124,10 @@ async def test_download_missing_file(mock_db):
     app.dependency_overrides[get_db] = get_db_override
 
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.get(f"/results/{job.id}/download?format=geojson")
+    with patch("api.routers.results.settings") as mock_settings:
+        mock_settings.output_dir = tmp_path
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.get(f"/results/{job.id}/download?format=geojson")
 
     assert response.status_code == 404
     assert "not found" in response.json()["detail"].lower()

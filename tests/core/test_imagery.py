@@ -74,7 +74,7 @@ def test_load_no_crs_raises(service, no_crs_geotiff):
 
 
 def test_load_nonexistent_file(service):
-    with pytest.raises(rasterio.errors.RasterioIOError):
+    with pytest.raises(rasterio.errors.RasterioIOError):  # type: ignore[attr-defined]
         service.load("/nonexistent/path.tif")
 
 

@@ -4,6 +4,7 @@ from temporalio.client import Client
 from temporalio.worker import Worker
 
 from core.config import settings
+from worker.activities._helpers import finalize_job
 from worker.activities.detection import detect_objects
 from worker.activities.export import export_results
 from worker.activities.imagery import load_imagery, tile_imagery
@@ -26,6 +27,7 @@ async def run_worker() -> None:
             postprocess,
             export_results,
             compute_indicators,
+            finalize_job,
         ],
     )
 

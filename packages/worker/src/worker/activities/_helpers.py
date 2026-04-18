@@ -7,8 +7,10 @@ from geoalchemy2.shape import from_shape, to_shape
 from pyproj import Geod
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
+from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
+from core.database import async_session_factory
 from core.models.detection import Detection
 from core.models.processing import JobStatus, ProcessingJob
 from core.services.detector import RawDetection
@@ -68,7 +70,7 @@ def detections_to_raw(detections: list[Detection]) -> list[RawDetection]:
         RawDetection(
             class_name=d.class_name,
             confidence=d.confidence,
-            geometry=to_shape(d.geometry),
+            geometry=to_shape(d.geometry),  # type: ignore[arg-type]
             source=d.source,
         )
         for d in detections
@@ -90,8 +92,23 @@ def raw_to_detections(
                 class_name=raw.class_name,
                 confidence=raw.confidence,
                 source=raw.source,
-                geometry=from_shape(raw.geometry, srid=4326),
+                geometry=from_shape(raw.geometry, srid=4326),  # type: ignore[arg-type]
                 area_m2=round(area_m2, 2),
             )
         )
     return results
+
+
+@activity.defn
+async def finalize_job(job_id: str) -> dict:
+    """Mark job as completed after all activities succeed."""
+    async with async_session_factory() as session:
+        job = await get_job(session, job_id)
+        await update_job(
+            session,
+            job,
+            status=JobStatus.COMPLETED,
+            current_step="completed",
+            completed=True,
+        )
+        return {"status": "completed", "job_id": job_id}

@@ -56,6 +56,9 @@ def mock_session():
     session = AsyncMock()
     session.__aenter__ = AsyncMock(return_value=session)
     session.__aexit__ = AsyncMock(return_value=False)
+    # add/add_all are sync methods; AsyncMock causes "coroutine never awaited"
+    session.add = MagicMock()
+    session.add_all = MagicMock()
     return session
 
 
@@ -436,6 +439,85 @@ async def test_compute_indicators_success(mock_session):
         assert result["indicator_count"] == 1
         calc_instance.compute.assert_called_once()
         mock_session.add_all.assert_called()
+
+
+# --- Idempotency tests ---
+
+
+@pytest.mark.asyncio
+async def test_detect_objects_idempotent(mock_session):
+    """detect_objects returns cached result when checkpoint already exists."""
+    job = _make_job(
+        checkpoint_data={
+            "load": {"crs": "EPSG:4326"},
+            "tile": {"tile_count": 1, "manifest_path": "/p", "tiles_dir": "/t"},
+            "detect": {"raw_detection_count": 5},
+        }
+    )
+    _setup_job_query(mock_session, job)
+
+    with patch(
+        "worker.activities.detection.async_session_factory",
+        return_value=mock_session,
+    ):
+        from worker.activities.detection import detect_objects
+
+        result = await detect_objects(str(job.id))
+
+    assert result["status"] == "detected"
+    assert result["detection_count"] == 5
+    # Should NOT have called add_all (skipped the work)
+    mock_session.add_all.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_postprocess_idempotent(mock_session):
+    """postprocess returns cached result when checkpoint already exists."""
+    stats = {"input_count": 10, "output_count": 5}
+    job = _make_job(
+        checkpoint_data={
+            "load": {"crs": "EPSG:4326"},
+            "detect": {"raw_detection_count": 10},
+            "postprocess": stats,
+        }
+    )
+    _setup_job_query(mock_session, job)
+
+    with patch(
+        "worker.activities.postprocessing.async_session_factory",
+        return_value=mock_session,
+    ):
+        from worker.activities.postprocessing import postprocess
+
+        result = await postprocess(str(job.id))
+
+    assert result["status"] == "postprocessed"
+    assert result["stats"] == stats
+
+
+@pytest.mark.asyncio
+async def test_compute_indicators_idempotent(mock_session):
+    """compute_indicators returns cached result when checkpoint already exists."""
+    job = _make_job(
+        checkpoint_data={
+            "load": {"crs": "EPSG:4326"},
+            "postprocess": {"output_count": 5},
+            "indicators": {"zone_count": 1, "indicator_count": 3},
+        }
+    )
+    _setup_job_query(mock_session, job)
+
+    with patch(
+        "worker.activities.indicators.async_session_factory",
+        return_value=mock_session,
+    ):
+        from worker.activities.indicators import compute_indicators
+
+        result = await compute_indicators(str(job.id))
+
+    assert result["status"] == "computed"
+    assert result["indicator_count"] == 3
+    mock_session.add_all.assert_not_called()
 
 
 # --- Helper tests ---

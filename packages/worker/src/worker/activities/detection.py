@@ -7,10 +7,12 @@ from pathlib import Path
 import numpy as np
 from pyproj import Geod
 from rasterio.transform import Affine
+from sqlalchemy import delete
 from temporalio import activity
 
 from core.config import settings
 from core.database import async_session_factory
+from core.models.detection import Detection
 from core.models.processing import JobStatus
 from core.models.tile import Tile
 from core.services.detector import DetectorService
@@ -22,6 +24,16 @@ async def detect_objects(job_id: str) -> dict:
     """Run ML inference on all tiles, save raw detections to DB."""
     async with async_session_factory() as session:
         job = await get_job(session, job_id)
+
+        # Idempotency guard: skip if already completed
+        if job.checkpoint_data and "detect" in job.checkpoint_data:
+            cached = job.checkpoint_data["detect"]
+            return {
+                "status": "detected",
+                "job_id": job_id,
+                "detection_count": cached["raw_detection_count"],
+            }
+
         await update_job(
             session, job, status=JobStatus.DETECTING, current_step="detect_objects"
         )
@@ -66,7 +78,10 @@ async def detect_objects(job_id: str) -> dict:
                     f"Tile {i + 1}/{len(tiles)}: {len(tile_detections)} detections"
                 )
 
-            # Persist to DB
+            # Persist to DB (delete any prior detections for idempotency)
+            await session.execute(
+                delete(Detection).where(Detection.job_id == job.id)  # type: ignore[arg-type]
+            )
             geod = Geod(ellps="WGS84")
             db_detections = raw_to_detections(all_raw_detections, job_id, geod)
             session.add_all(db_detections)

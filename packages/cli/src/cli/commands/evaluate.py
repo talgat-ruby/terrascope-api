@@ -16,10 +16,10 @@ def _load_detections(path: Path) -> list[RawDetection]:
     for _, row in gdf.iterrows():
         detections.append(
             RawDetection(
-                class_name=row.get("class_name", row.get("class", "unknown")),
-                confidence=int(row.get("confidence", 100)),
+                class_name=str(row.get("class_name") or row.get("class") or "unknown"),
+                confidence=int(row.get("confidence") or 100),
                 geometry=row.geometry,
-                source=row.get("source", "ground_truth"),
+                source=str(row.get("source") or "ground_truth"),
             )
         )
     return detections
