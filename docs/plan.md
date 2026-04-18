@@ -49,26 +49,14 @@ Build a prototype for extracting objects/features from satellite imagery and gen
 
 ---
 
-## Phase 3: ML Detection Engine
+## Phase 3: ML Detection Engine -- COMPLETED
 
-**Goal**: Pretrained model wrappers, inference on tiles, mask-to-vector conversion.
-
-### Files to create (`packages/core/src/core/services/`)
-
-- `detector.py` -- `DetectorService`
-  - `predict_tile(tile)` -- inference, returns list of detections
-  - `_mask_to_polygons(mask, transform, class_id)` -- `rasterio.features.shapes` + shapely
-  - `_assign_confidence(polygon, raw_probs)` -- mean prob -> 0-100
-- `models/torchgeo_model.py` -- semantic segmentation (vegetation, roads)
-- `models/samgeo_model.py` -- instance segmentation (buildings)
-
-### Strategy
-
-- torchgeo for land cover classes, samgeo for buildings, merge by class
-
-### Tests
-
-- `tests/core/test_detector.py` -- mock model, mask-to-polygon
+- `DetectorService` (`services/detector.py`): `predict_tile()` dispatches to TorchGeo (vegetation/road/water) and SAMGeo (buildings), `predict_tile_with_masks()` for testing/external masks, `_mask_to_polygons()` converts probability masks to vector polygons via `rasterio.features.shapes` + shapely, `_assign_confidence()` computes mean probability in bounding region as 0-100 score
+- `RawDetection` dataclass: intermediate detection format (class_name, confidence, geometry as `BaseGeometry`, source)
+- `TorchGeoModel` (`services/models/torchgeo_model.py`): wraps torchgeo ResNet18 with Sentinel-2 MOCO weights for semantic segmentation; produces per-class probability masks for vegetation, road, water
+- `SamGeoModel` (`services/models/samgeo_model.py`): wraps segment-geospatial for building instance segmentation; writes temp GeoTIFF (SAMGeo requires file input), reads back binary mask
+- Both models follow same pattern: `load()` initializes weights, `predict()` returns `dict[str, NDArray[float32]]` mapping class names to probability masks
+- 9 detector tests covering mask-to-polygon, empty/below-threshold masks, confidence scoring, valid_mask respect, unknown class filtering, multi-region detection (36 total passing)
 
 ---
 

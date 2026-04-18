@@ -103,4 +103,4 @@ alembic upgrade head
 
 The full implementation plan with phases, steps, and status is in `docs/plan.md`. Always refer to it before starting work on a phase or step.
 
-Phases 1-2 are complete. Phase 3 (ML detection engine) is next. Phases 4-10 cover post-processing, GIS export, analytics, workflow integration, CLI, quality evaluation, and final testing/docs.
+Phases 1-3 are complete. Phase 4 (post-processing) is next. Phases 5-10 cover GIS export, analytics, workflow integration, CLI, quality evaluation, and final testing/docs.
