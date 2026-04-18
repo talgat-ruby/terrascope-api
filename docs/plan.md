@@ -36,27 +36,16 @@ Build a prototype for extracting objects/features from satellite imagery and gen
 
 ---
 
-## Phase 2: Imagery Processing Pipeline
+## Phase 2: Imagery Processing Pipeline -- COMPLETED
 
-**Goal**: Load GeoTIFF, validate georeferencing, clip to AOI, produce tiles.
-
-### Files to create (`packages/core/src/core/services/`)
-
-- `imagery.py` -- `ImageryLoaderService`
-  - `load(path)` -- opens GeoTIFF, validates CRS present
-  - `clip_to_aoi(dataset, aoi, aoi_crs)` -- reprojects if CRS mismatch, clips raster
-  - `get_metadata(dataset)` -- band count, CRS, bounds, resolution
-- `tiler.py` -- `TilerService`
-  - `generate_tiles(data, transform, tile_size, overlap)` -- rasterio windowed reads, yields Tile
-  - `tile_bounds(tile)` -- geographic bbox
-- `stac.py` -- `StacService`
-  - `search(bbox, datetime_range, collection)` -- pystac-client
-  - `download(item, output_dir)` -- download COG to local
-
-### Tests
-
-- `tests/core/test_imagery.py` -- synthetic GeoTIFF fixture, load/clip/CRS
-- `tests/core/test_tiler.py` -- tile count, overlap, padding
+- `ImageryLoaderService` (`services/imagery.py`): `load()` validates CRS, `clip_to_aoi()` reprojects AOI via pyproj+shapely if CRS mismatch then clips with `rasterio.mask.mask(crop=True, nodata=0)`, `get_metadata()` returns band_count/crs/bounds/resolution
+- `TilerService` (`services/tiler.py`): `generate_tiles()` splits raster into overlapping tiles (stride = tile_size - overlap), pads edge tiles with zeros, sets `valid_mask=False` for padded pixels; `tile_bounds()` returns geographic bbox from tile transform
+- `StacService` (`services/stac.py`): sync `search()` via pystac-client with configurable collection/bbox/datetime, async `download()` streams COG via httpx with configurable `asset_key` (default "visual")
+- Services are sync (rasterio is blocking C lib); Temporal activities will wrap in `asyncio.to_thread()` in Phase 7
+- CRS comparison uses `pyproj.CRS` objects for robustness
+- Affine tuple unpacking uses `# type: ignore[misc]` for pyright (known Affine typing limitation)
+- `services/__init__.py` exports all three services
+- 7 imagery tests + 8 tiler tests = 15 new tests (27 total passing)
 
 ---
 
