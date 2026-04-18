@@ -18,14 +18,27 @@ Satellite imagery analysis system that detects objects (buildings, roads, vegeta
 ```
 packages/
   core/    # Shared models, schemas, services, config, database
-  api/     # FastAPI application and routers
-  worker/  # Temporal workflows and activities
+  api/     # FastAPI application and routers (+ Dockerfile)
+  worker/  # Temporal workflows and activities (+ Dockerfile)
   cli/     # Typer CLI tool
 alembic/   # Database migrations
 infra/     # Docker Compose (Postgres, Temporal, Elasticsearch)
 tests/     # Test suite (mirrors packages/ structure)
-docs/      # Assignment spec and implementation plan
+docs/      # Technical report, assignment spec, implementation plan
 ```
+
+## Architecture
+
+The system implements a 6-step processing pipeline:
+
+```
+Load GeoTIFF -> Tile -> Detect Objects -> Post-process -> Export GIS -> Compute Indicators
+```
+
+- **Detection:** TorchGeo FCN for vegetation/road/water, SAMGeo for buildings
+- **Post-processing:** NMS, confidence/size/shape filtering, geometry simplification
+- **Export:** GeoJSON (WGS84), GeoPackage, Shapefile with geodesic area_m2
+- **Orchestration:** Temporal workflows with per-activity checkpointing, or local CLI
 
 ## Prerequisites
 
@@ -61,11 +74,66 @@ uv run python -m worker.main
 
 API docs available at http://localhost:30001/docs
 
+## CLI
+
+```bash
+# Local processing pipeline
+terrascope process --input image.tif --aoi aoi.geojson --output ./results
+
+# Submit to Temporal workflow
+terrascope process --input image.tif --aoi aoi.geojson --use-temporal
+
+# STAC catalog search
+terrascope stac search --bbox 10.0,49.0,11.0,50.0 --datetime 2024-01-01/2024-06-01
+
+# Download STAC asset
+terrascope stac download --bbox 10.0,49.0,11.0,50.0 --output ./data
+
+# Quality evaluation against ground truth
+terrascope evaluate --predictions preds.geojson --ground-truth gt.geojson --report report.json
+```
+
+## Docker
+
+Each service has its own Dockerfile inside its package directory. Build from the repo root (required for uv workspace resolution):
+
+```bash
+# Build images
+docker build -f packages/api/Dockerfile -t terrascope-api .
+docker build -f packages/worker/Dockerfile -t terrascope-worker .
+
+# Run API with infrastructure
+docker run --rm --network terrascope-network \
+  -e POSTGRES_HOST=terrascope-postgres \
+  -e TEMPORAL_HOST=terrascope-temporal \
+  -p 8080:8080 terrascope-api
+
+# Run worker with infrastructure
+docker run --rm --network terrascope-network \
+  -e POSTGRES_HOST=terrascope-postgres \
+  -e TEMPORAL_HOST=terrascope-temporal \
+  -v model_cache:/app/model_cache \
+  terrascope-worker
+```
+
+Per-service compose files are also available:
+
+```bash
+docker compose -f packages/api/compose.yaml up --build
+docker compose -f packages/worker/compose.yaml up --build
+```
+
 ## Testing
 
 ```bash
+# Run all tests
 uv run pytest
+
+# Run with coverage
 uv run pytest --cov
+
+# Run integration tests only
+uv run pytest tests/integration/
 ```
 
 ## Linting
@@ -85,3 +153,9 @@ uvx pyright
 | Temporal      | 37233 |
 | Temporal UI   | 38080 |
 | Elasticsearch | 39200 |
+
+## Documentation
+
+- [Technical Report](docs/technical_report.md) -- data description, approach, metrics, conclusions, limitations
+- [Assignment Spec](docs/assignment.md) -- original requirements
+- [Implementation Plan](docs/plan.md) -- phase-by-phase development log

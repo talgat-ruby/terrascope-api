@@ -1,0 +1,47 @@
+# Comments are provided throughout this file to help you get started.
+# If you need more help, visit the Docker Compose reference guide at
+# https://docs.docker.com/go/compose-spec-reference/
+
+# Build context is the repo root since this is a uv workspace monorepo.
+# Run with: docker compose -f packages/worker/compose.yaml up --build
+
+services:
+  worker:
+    build:
+      context: ../..
+      dockerfile: packages/worker/Dockerfile
+    env_file:
+      - ../../.env
+    environment:
+      - POSTGRES_HOST=terrascope-postgres
+      - TEMPORAL_HOST=terrascope-temporal
+    volumes:
+      - worker-model-cache:/app/model_cache
+      - worker-output:/app/output
+    networks:
+      - terrascope-network
+    depends_on:
+      - postgres
+      - temporal
+
+  postgres:
+    extends:
+      file: ../../infra/compose/compose.postgres.yml
+      service: postgres
+    networks:
+      - terrascope-network
+
+  temporal:
+    extends:
+      file: ../../infra/compose/compose.temporal.yml
+      service: temporal
+    networks:
+      - terrascope-network
+
+volumes:
+  worker-model-cache:
+  worker-output:
+
+networks:
+  terrascope-network:
+    external: true

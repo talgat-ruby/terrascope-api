@@ -130,7 +130,7 @@ Build a prototype for extracting objects/features from satellite imagery and gen
 
 ---
 
-## Phase 10: Testing, Docker & Documentation
+## Phase 10: Testing, Docker & Documentation -- COMPLETED
 
 ### Files to create
 
