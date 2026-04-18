@@ -240,21 +240,60 @@ def test_stac_download(tmp_path):
 # --- evaluate command tests ---
 
 
-def test_evaluate_stub():
-    """Test evaluate command shows stub message."""
+def test_evaluate_runs(tmp_path):
+    """Test evaluate command with real GeoJSON files."""
+    import geopandas as gpd
+    from shapely.geometry import box as shapely_box
+
+    # Create prediction GeoJSON
+    pred_gdf = gpd.GeoDataFrame(
+        {
+            "class_name": ["building", "building"],
+            "confidence": [90, 70],
+            "source": ["test", "test"],
+            "geometry": [shapely_box(0, 0, 1, 1), shapely_box(5, 5, 6, 6)],
+        },
+        crs="EPSG:4326",
+    )
+    pred_path = tmp_path / "preds.geojson"
+    pred_gdf.to_file(pred_path, driver="GeoJSON")
+
+    # Create ground truth GeoJSON
+    gt_gdf = gpd.GeoDataFrame(
+        {
+            "class_name": ["building"],
+            "confidence": [100],
+            "source": ["ground_truth"],
+            "geometry": [shapely_box(0, 0, 1, 1)],
+        },
+        crs="EPSG:4326",
+    )
+    gt_path = tmp_path / "gt.geojson"
+    gt_gdf.to_file(gt_path, driver="GeoJSON")
+
+    report_path = tmp_path / "report.json"
+
     result = runner.invoke(
         app,
         [
             "evaluate",
             "--predictions",
-            "/fake/preds.geojson",
+            str(pred_path),
             "--ground-truth",
-            "/fake/gt.geojson",
+            str(gt_path),
+            "--output",
+            str(report_path),
+            "--sample",
+            "1",
         ],
     )
 
-    assert result.exit_code == 0
-    assert "Phase 9" in result.output
+    assert result.exit_code == 0, result.output
+    assert "building" in result.output
+    assert "Prec" in result.output
+    assert "Report saved" in result.output
+    assert "Control sample" in result.output
+    assert report_path.exists()
 
 
 # --- worker command tests ---

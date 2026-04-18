@@ -118,22 +118,15 @@ Build a prototype for extracting objects/features from satellite imagery and gen
 
 ---
 
-## Phase 9: Quality Evaluation
+## Phase 9: Quality Evaluation -- COMPLETED
 
-**Goal**: Precision, Recall, F1, IoU, mAP + visualization.
-
-### Files to create (`packages/core/src/core/services/`)
-
-- `evaluator.py` -- `QualityEvaluatorService`
-  - `evaluate(predictions, ground_truth, iou_threshold)` -- per-class metrics
-  - `generate_report(metrics, error_examples)`
-  - `create_control_sample(detections, sample_size)`
-- `visualization.py` -- `VisualizationService`
-  - `render_overlay(imagery_path, detections, output_path)` -- matplotlib PNG
-
-### Tests
-
-- `tests/core/test_evaluator.py`
+- `QualityEvaluatorService` (`services/evaluator.py`): `evaluate()` with greedy IoU-based matching, per-class precision/recall/F1/IoU/mAP, `_compute_ap()` using 11-point interpolation, `generate_report()` JSON output, `create_control_sample()` for manual review
+- `ClassMetrics` and `EvaluationResult` dataclasses for structured results
+- Error examples (FP/FN) collected with geometry WKT for debugging
+- `VisualizationService` (`services/visualization.py`): `render_overlay()` draws detection polygons on GeoTIFF imagery with per-class colors, 2-98th percentile normalization, matplotlib legend
+- CLI `evaluate` command wired: loads GeoJSON predictions/GT via geopandas, prints metrics table, optional JSON report and control sample
+- Services exported via `__init__.py`
+- 16 new tests: 11 evaluate (perfect match, no overlap, partial, multi-class, empty inputs, greedy matching, error examples, threshold sensitivity), 2 report/sample, 2 visualization, 1 CLI evaluate (107 total passing)
 
 ---
 
