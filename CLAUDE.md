@@ -106,4 +106,4 @@ alembic upgrade head
 
 The full implementation plan with phases, steps, and status is in `docs/plan.md`. Always refer to it before starting work on a phase or step.
 
-Phases 1-5 are complete. Phase 6 (analytics/indicators) is next. Phases 7-10 cover workflow integration, CLI, quality evaluation, and final testing/docs.
+Phases 1-6 are complete. Phase 7 (Temporal workflows & API endpoints) is next. Phases 8-10 cover CLI, quality evaluation, and final testing/docs.

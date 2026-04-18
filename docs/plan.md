@@ -79,20 +79,13 @@ Build a prototype for extracting objects/features from satellite imagery and gen
 
 ---
 
-## Phase 6: Analytics/Indicators
+## Phase 6: Analytics/Indicators -- COMPLETED
 
-**Goal**: Per-zone quantitative metrics, persist to DB.
-
-### Files to create
-
-- `packages/core/src/core/services/indicators.py` -- `IndicatorCalculatorService`
-  - `compute(detections, zones)` -- spatial intersection, count/density/area per class
-  - `export_csv` / `export_json`
-  - `generate_summary_table(indicators)`
-
-### Tests
-
-- `tests/core/test_indicators.py`
+- `IndicatorCalculatorService` (`services/indicators.py`): `compute(detections, zones)` performs spatial intersection per zone/class, computes count, density_per_km2, total_area_m2 using `Geod(ellps="WGS84")` for geodesic accuracy; partial intersections are clipped to zone boundary
+- `ZoneIndicatorResult` dataclass: zone_id, class_name, count, density_per_km2, total_area_m2
+- `export_csv()` / `export_json()` write indicators to file
+- `generate_summary_table()` groups by zone with per-class breakdowns and totals
+- 8 indicator tests covering basic compute, outside-zone filtering, multi-zone, partial intersection, empty input, CSV/JSON export, summary table (67 total passing)
 
 ---
 
