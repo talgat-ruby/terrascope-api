@@ -89,32 +89,22 @@ Build a prototype for extracting objects/features from satellite imagery and gen
 
 ---
 
-## Phase 7: Temporal Workflows & API Endpoints
+## Phase 7: Temporal Workflows & API Endpoints -- COMPLETED
 
-**Goal**: Wire up Temporal workflows with real activities + finalize REST API.
-
-### Worker package (`packages/worker/src/worker/`)
-
-- `workflows/processing.py` -- `ProcessingWorkflow` with 6 activities:
-  1. `load_imagery` -- validate GeoTIFF, save metadata to DB
-  2. `tile_imagery` -- generate tiles, store manifest as checkpoint
-  3. `detect_objects` -- ML inference, save raw detections to DB
-  4. `postprocess` -- NMS + filtering, update detections
-  5. `export_results` -- generate GeoJSON/GeoPackage files
-  6. `compute_indicators` -- zone stats, save to DB
-- Each updates `ProcessingJob.current_step` + `checkpoint_data`
-- Resumes from last completed activity on restart
-
-### API package (`packages/api/src/api/`)
-
-- Finalize all router implementations (currently stubs)
-- Wire `POST /processing/start` to trigger Temporal workflow
-- Wire `GET /results/{job_id}/detections` to query PostGIS with `ST_AsGeoJSON`
-
-### Tests
-
-- `tests/api/test_api_*.py`
-- `tests/worker/test_workflows.py`, `test_activities.py`
+- All 6 activity stubs implemented with real core service integration + DB persistence
+- `_helpers.py` module: `get_job()`, `update_job()`, `fail_job()`, `detections_to_raw()`, `raw_to_detections()`
+- `load_imagery`: loads GeoTIFF via `ImageryLoaderService`, clips to AOI, saves `.npy` to disk, stores metadata in `checkpoint_data`
+- `tile_imagery`: loads clipped data, tiles via `TilerService`, saves tiles + manifest to disk
+- `detect_objects`: loads tiles from manifest, runs `DetectorService.predict_tile()`, bulk inserts `Detection` rows with PostGIS geometry
+- `postprocess`: queries detections from DB, runs `PostprocessorService.run()` with config, deletes raw detections and inserts filtered ones
+- `export_results`: queries detections, exports via `GISExporterService.export_all()` to GeoJSON/GPKG/Shapefile, stores paths in checkpoint
+- `compute_indicators`: queries detections + territories, runs `IndicatorCalculatorService.compute()`, inserts `ZoneIndicator` rows, marks job COMPLETED
+- Each activity updates `ProcessingJob.status`, `current_step`, `checkpoint_data`; catches exceptions and calls `fail_job()`
+- `POST /processing/start` triggers `ProcessingWorkflow` via Temporal client
+- `POST /processing/{job_id}/retry` validates FAILED status, resets job, starts new workflow
+- `GET /results/{job_id}/download` serves export files via `FileResponse` with format-specific media types
+- STAC endpoints (`POST /stac/search`, `POST /stac/download`) implemented using `StacService`
+- 8 activity tests + 5 API processing tests + 4 API results tests = 17 new tests (84 total passing)
 
 ---
 

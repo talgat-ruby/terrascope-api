@@ -4,9 +4,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
-from api.dependencies import get_db
-from core.models.processing import ProcessingJob
+from api.dependencies import get_db, get_temporal_client
+from core.config import settings
+from core.models.processing import JobStatus, ProcessingJob
 from core.schemas.processing import ProcessingRequest, ProcessingStatusResponse
+from worker.workflows.processing import ProcessingWorkflow
 
 router = APIRouter()
 
@@ -28,9 +30,13 @@ async def start_processing(
     await db.commit()
     await db.refresh(job)
 
-    # TODO Phase 7: Start Temporal workflow here
-    # client = await get_temporal_client()
-    # await client.start_workflow(...)
+    client = await get_temporal_client()
+    await client.start_workflow(
+        ProcessingWorkflow.run,
+        str(job.id),
+        id=f"processing-{job.id}",
+        task_queue=settings.temporal_task_queue,
+    )
 
     return {"job_id": str(job.id), "status": job.status}
 
@@ -61,11 +67,32 @@ async def get_log(job_id: uuid.UUID, db: AsyncSession = Depends(get_db)) -> dict
 
 
 @router.post("/{job_id}/retry")
-async def retry_processing(job_id: uuid.UUID, db: AsyncSession = Depends(get_db)) -> dict:
+async def retry_processing(
+    job_id: uuid.UUID, db: AsyncSession = Depends(get_db)
+) -> dict:
     result = await db.execute(select(ProcessingJob).where(ProcessingJob.id == job_id))
     job = result.scalar_one_or_none()
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    # TODO Phase 7: Re-trigger Temporal workflow from checkpoint
+    if job.status != JobStatus.FAILED:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Can only retry failed jobs, current status: {job.status}",
+        )
+
+    job.status = JobStatus.PENDING
+    job.error_message = None
+    db.add(job)
+    await db.commit()
+
+    client = await get_temporal_client()
+    retry_id = uuid.uuid4()
+    await client.start_workflow(
+        ProcessingWorkflow.run,
+        str(job.id),
+        id=f"processing-{job.id}-retry-{retry_id}",
+        task_queue=settings.temporal_task_queue,
+    )
+
     return {"job_id": str(job.id), "status": "retry_scheduled"}

@@ -1,6 +1,8 @@
 import uuid
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import FileResponse
 from geoalchemy2.shape import to_shape
 from shapely.geometry import mapping
 from sqlalchemy import func
@@ -10,7 +12,7 @@ from sqlmodel import select
 from api.dependencies import get_db
 from core.models.detection import Detection
 from core.models.indicator import ZoneIndicator
-from core.models.processing import ProcessingJob
+from core.models.processing import JobStatus, ProcessingJob
 from core.models.quality import QualityMetrics
 
 router = APIRouter()
@@ -75,12 +77,40 @@ async def get_detections(
 async def download_results(
     job_id: uuid.UUID,
     format: str = Query("geojson", pattern="^(geojson|gpkg|shp)$"),
-) -> dict:
-    # Deferred to Phase 7: requires export_results activity to write files first
-    return {
-        "status": "not_implemented",
-        "message": "Export will be available in Phase 7",
+    db: AsyncSession = Depends(get_db),
+) -> FileResponse:
+    result = await db.execute(select(ProcessingJob).where(ProcessingJob.id == job_id))
+    job = result.scalar_one_or_none()
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+    if job.status != JobStatus.COMPLETED:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Job not completed, current status: {job.status}",
+        )
+
+    export_formats = (job.checkpoint_data or {}).get("export", {}).get("formats", {})
+    file_path_str = export_formats.get(format)
+    if not file_path_str:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Export format '{format}' not available",
+        )
+
+    file_path = Path(file_path_str)
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Export file not found on disk")
+
+    media_types = {
+        "geojson": "application/geo+json",
+        "gpkg": "application/geopackage+sqlite3",
+        "shp": "application/x-shapefile",
     }
+    return FileResponse(
+        path=str(file_path),
+        filename=file_path.name,
+        media_type=media_types.get(format, "application/octet-stream"),
+    )
 
 
 @router.get("/{job_id}/indicators")
