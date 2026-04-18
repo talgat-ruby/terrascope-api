@@ -106,4 +106,4 @@ alembic upgrade head
 
 The full implementation plan with phases, steps, and status is in `docs/plan.md`. Always refer to it before starting work on a phase or step.
 
-Phases 1-7 are complete. Phase 8 (CLI tool) is next. Phases 9-10 cover quality evaluation and final testing/docs.
+Phases 1-8 are complete. Phase 9 (quality evaluation) is next. Phase 10 covers final testing/docs.

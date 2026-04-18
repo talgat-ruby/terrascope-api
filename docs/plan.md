@@ -108,20 +108,13 @@ Build a prototype for extracting objects/features from satellite imagery and gen
 
 ---
 
-## Phase 8: CLI Tool
+## Phase 8: CLI Tool -- COMPLETED
 
-**Goal**: Typer CLI -- direct processing or via Temporal.
-
-### Files to update (`packages/cli/src/cli/commands/`)
-
-- `process.py` -- implement using core services directly or via Temporal client
-- `stac.py` -- implement using `StacService`
-- `evaluate.py` -- implement using `QualityEvaluatorService`
-- `worker.py` -- already wired to `worker.main`
-
-### Tests
-
-- `tests/cli/test_cli.py`
+- `process.py`: full local pipeline (load → tile → detect → postprocess → export → indicators) with `--use-temporal` flag for Temporal submission
+- `stac.py`: search and download commands using `StacService`, bbox parsing, async wrappers
+- `evaluate.py`: stub awaiting Phase 9 `QualityEvaluatorService`
+- `worker.py`: already complete (imports `worker.main`)
+- 7 CLI tests covering local processing, temporal flag, STAC search/download, evaluate stub, worker help (91 total passing)
 
 ---
 
