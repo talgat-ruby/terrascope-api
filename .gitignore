@@ -22,6 +22,10 @@ uploads/
 # IDE
 .idea/
 .vscode/
+.kiro/
 
 # OS
 .DS_Store
+
+# tmp
+tmp/

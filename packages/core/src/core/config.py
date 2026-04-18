@@ -1,20 +1,48 @@
 from pathlib import Path
 
-from pydantic_settings import BaseSettings
+from pydantic import computed_field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
     app_name: str = "Terrascope"
+    app_env: str = "LOCAL"
+    api_port: int = 30001
     debug: bool = False
 
-    # Database
-    database_url: str = "postgresql+asyncpg://terrascope:terrascope@localhost:5432/terrascope"
-    database_url_sync: str = "postgresql://terrascope:terrascope@localhost:5432/terrascope"
+    # Database (composed from individual env vars)
+    postgres_host: str = "127.0.0.1"
+    postgres_port: int = 5432
+    postgres_db: str = "terrascope"
+    postgres_user: str = "terrascope"
+    postgres_password: str = "terrascope"
+
+    @computed_field
+    @property
+    def database_url(self) -> str:
+        return f"postgresql+asyncpg://{self.postgres_user}:{self.postgres_password}@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
+
+    @computed_field
+    @property
+    def database_url_sync(self) -> str:
+        return f"postgresql://{self.postgres_user}:{self.postgres_password}@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
 
     # Temporal
-    temporal_host: str = "localhost:7233"
+    temporal_host: str = "127.0.0.1"
+    temporal_port: int = 7233
     temporal_namespace: str = "default"
     temporal_task_queue: str = "terrascope-processing"
+
+    @computed_field
+    @property
+    def temporal_address(self) -> str:
+        return f"{self.temporal_host}:{self.temporal_port}"
 
     # File storage
     upload_dir: Path = Path("uploads")

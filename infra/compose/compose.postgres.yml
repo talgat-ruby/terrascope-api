@@ -1,0 +1,24 @@
+---
+services:
+  postgres:
+    container_name: terrascope-postgres
+    image: postgis/postgis
+    build:
+      context: https://github.com/postgis/docker-postgis.git#master:18-3.6
+    environment:
+      POSTGRES_DB: $POSTGRES_DB
+      POSTGRES_USER: $POSTGRES_USER
+      POSTGRES_PASSWORD: $POSTGRES_PASSWORD
+    ports:
+      - $POSTGRES_PORT:5432
+    volumes:
+      - /var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -d ${POSTGRES_DB} -U ${POSTGRES_USER}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      terrascope-network:
+        aliases:
+          - $POSTGRES_CONTAINER_NAME

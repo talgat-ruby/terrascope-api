@@ -17,5 +17,5 @@ async def get_db() -> AsyncGenerator[AsyncSession]:
 async def get_temporal_client() -> Client:
     global _temporal_client
     if _temporal_client is None:
-        _temporal_client = await Client.connect(settings.temporal_host)
+        _temporal_client = await Client.connect(settings.temporal_address)
     return _temporal_client

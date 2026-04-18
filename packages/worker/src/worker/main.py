@@ -13,7 +13,7 @@ from worker.workflows.processing import ProcessingWorkflow
 
 
 async def run_worker() -> None:
-    client = await Client.connect(settings.temporal_host)
+    client = await Client.connect(settings.temporal_address)
 
     worker = Worker(
         client,

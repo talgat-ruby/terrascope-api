@@ -18,7 +18,7 @@ class JobStatus(str, enum.Enum):
 
 
 class ProcessingJob(SQLModel, table=True):
-    __tablename__ = "processing_jobs"
+    __tablename__ = "processing_jobs"  # type: ignore[assignment]
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     status: JobStatus = Field(default=JobStatus.PENDING)

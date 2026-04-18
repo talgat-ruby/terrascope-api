@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Satellite imagery analysis: object detection and GIS layer generation"
 readme = "README.md"
 requires-python = ">=3.14"
+dependencies = []
 
 [tool.uv.workspace]
 members = ["packages/*"]
@@ -19,6 +20,7 @@ dev = [
     "terrascope-api",
     "terrascope-worker",
     "terrascope-cli",
+    "python-dotenv>=1.2.2",
 ]
 
 [tool.uv.sources]
@@ -26,6 +28,11 @@ terrascope-core = { workspace = true }
 terrascope-api = { workspace = true }
 terrascope-worker = { workspace = true }
 terrascope-cli = { workspace = true }
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+extraPaths = ["packages/core/src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

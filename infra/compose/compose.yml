@@ -1,0 +1,9 @@
+---
+include:
+  - ./compose.postgres.yml
+  - ./compose.temporal.yml
+
+networks:
+  terrascope-network:
+    driver: bridge
+    name: terrascope-network

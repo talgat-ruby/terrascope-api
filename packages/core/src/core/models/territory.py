@@ -6,7 +6,7 @@ from sqlmodel import Field, SQLModel
 
 
 class Territory(SQLModel, table=True):
-    __tablename__ = "territories"
+    __tablename__ = "territories"  # type: ignore[assignment]
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     name: str

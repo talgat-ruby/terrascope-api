@@ -4,7 +4,7 @@ from sqlmodel import Field, SQLModel
 
 
 class QualityMetrics(SQLModel, table=True):
-    __tablename__ = "quality_metrics"
+    __tablename__ = "quality_metrics"  # type: ignore[assignment]
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     job_id: uuid.UUID = Field(foreign_key="processing_jobs.id", index=True)

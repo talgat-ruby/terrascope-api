@@ -30,7 +30,7 @@ CLASS_REGISTRY: dict[str, dict] = {
 
 
 class Detection(SQLModel, table=True):
-    __tablename__ = "detections"
+    __tablename__ = "detections"  # type: ignore[assignment]
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     job_id: uuid.UUID = Field(foreign_key="processing_jobs.id", index=True)

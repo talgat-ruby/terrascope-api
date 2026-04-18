@@ -1,11 +1,13 @@
+import os
 from logging.config import fileConfig
-
+from urllib.parse import quote_plus
+from dotenv import load_dotenv
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 from sqlmodel import SQLModel
 
 # Import all models so they register with SQLModel.metadata
-from core.models import (  # noqa: F401
+from core.models import (
     Detection,
     ProcessingJob,
     QualityMetrics,
@@ -13,7 +15,21 @@ from core.models import (  # noqa: F401
     ZoneIndicator,
 )
 
+load_dotenv()  # reads .env from cwd
+
 config = context.config
+
+config.set_main_option(
+    "sqlalchemy.url",
+    "postgresql://{user}:{pw}@{host}:{port}/{db}".format(
+        user=quote_plus(os.environ["POSTGRES_USER"]),
+        pw=quote_plus(os.environ["POSTGRES_PASSWORD"]),
+        host=os.environ["POSTGRES_HOST"],
+        port=os.environ["POSTGRES_PORT"],
+        db=os.environ["POSTGRES_DB"],
+    ),
+)
+
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
