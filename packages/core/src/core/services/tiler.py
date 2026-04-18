@@ -22,6 +22,7 @@ class TilerService:
         transform: Affine,
         tile_size: int | None = None,
         overlap: int | None = None,
+        crs: str = "EPSG:4326",
     ) -> Generator[Tile, None, None]:
         """Split raster into overlapping tiles, padding edges with zeros.
 
@@ -61,6 +62,7 @@ class TilerService:
                     transform=tile_transform,
                     data=tile_data,
                     valid_mask=valid_mask,
+                    crs=crs,
                 )
 
     def tile_bounds(self, tile: Tile) -> tuple[float, float, float, float]:

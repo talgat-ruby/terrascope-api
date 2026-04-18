@@ -1,5 +1,6 @@
 """StacService -- search and download satellite imagery via STAC API."""
 
+import asyncio
 from pathlib import Path
 
 import httpx
@@ -15,7 +16,7 @@ class StacService:
     def __init__(self, api_url: str | None = None) -> None:
         self.api_url = api_url or settings.stac_api_url
 
-    def search(
+    async def search(
         self,
         bbox: tuple[float, float, float, float],
         datetime_range: str,
@@ -34,13 +35,17 @@ class StacService:
         Raises:
             RuntimeError: If no items match the query.
         """
-        client = Client.open(self.api_url)
-        search = client.search(
-            collections=[collection],
-            bbox=bbox,
-            datetime=datetime_range,
-        )
-        items = list(search.items())
+
+        def _blocking_search() -> list[Item]:
+            client = Client.open(self.api_url)
+            search = client.search(
+                collections=[collection],
+                bbox=bbox,
+                datetime=datetime_range,
+            )
+            return list(search.items())
+
+        items = await asyncio.to_thread(_blocking_search)
 
         if not items:
             raise RuntimeError(

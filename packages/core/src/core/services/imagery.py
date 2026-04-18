@@ -9,6 +9,7 @@ from numpy.typing import NDArray
 from pyproj import CRS, Transformer
 from rasterio.transform import Affine
 from shapely import ops
+from shapely.geometry import box as shapely_box
 from shapely.geometry.base import BaseGeometry
 
 
@@ -39,7 +40,7 @@ class ImageryLoaderService:
         dataset: rasterio.DatasetReader,
         aoi: BaseGeometry,
         aoi_crs: str = "EPSG:4326",
-    ) -> tuple[NDArray[np.float32], Affine]:
+    ) -> tuple[NDArray[np.float32], Affine, str]:
         """Clip raster to AOI bounds, reprojecting AOI if CRS differs.
 
         Args:
@@ -48,7 +49,7 @@ class ImageryLoaderService:
             aoi_crs: CRS of the AOI geometry.
 
         Returns:
-            Tuple of (clipped data as float32, updated transform).
+            Tuple of (clipped data as float32, updated transform, CRS string).
 
         Raises:
             ValueError: If AOI does not intersect the raster.
@@ -57,19 +58,21 @@ class ImageryLoaderService:
         aoi_crs_obj = CRS.from_user_input(aoi_crs)
 
         if dataset_crs != aoi_crs_obj:
-            transformer = Transformer.from_crs(
-                aoi_crs_obj, dataset_crs, always_xy=True
-            )
+            transformer = Transformer.from_crs(aoi_crs_obj, dataset_crs, always_xy=True)
             aoi = ops.transform(transformer.transform, aoi)
+
+        dataset_bbox = shapely_box(*dataset.bounds)
+        if not dataset_bbox.intersects(aoi):
+            raise ValueError("AOI does not intersect raster")
 
         out_image, out_transform = rasterio.mask.mask(
             dataset, [aoi], crop=True, all_touched=True, filled=True, nodata=0
         )
 
-        if out_image.size == 0 or np.all(out_image == 0):
+        if out_image.size == 0:
             raise ValueError("AOI does not intersect raster")
 
-        return out_image.astype(np.float32), out_transform
+        return out_image.astype(np.float32), out_transform, str(dataset.crs)
 
     def get_metadata(self, dataset: rasterio.DatasetReader) -> dict:
         """Extract raster metadata.

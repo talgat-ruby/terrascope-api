@@ -92,7 +92,7 @@ def test_filter_by_shape_removes_slivers():
 def test_simplify_geometries():
     service = PostprocessorService()
     detections = [_det(bounds=(0, 0, 1, 1))]
-    result = service.simplify_geometries(detections, tolerance=0.01)
+    result = service.simplify_geometries(detections, tolerance_m=1000.0)
     assert len(result) == 1
     assert result[0].geometry.is_valid
 
@@ -132,7 +132,8 @@ def test_run_full_pipeline():
     config = PostprocessingConfig(
         iou_threshold=0.5,
         confidence_threshold=50,
-        simplify_tolerance=0.001,
+        simplify_tolerance_m=0.001,
+        max_area_m2=float("inf"),
     )
     aoi = box(0, 0, 10, 10)
 
@@ -155,8 +156,9 @@ def test_run_full_pipeline():
 def test_run_without_aoi():
     """Pipeline should work without AOI clipping."""
     service = PostprocessorService()
+    config = PostprocessingConfig(max_area_m2=float("inf"))
     detections = [_det(confidence=80, bounds=(0, 0, 1, 1))]
-    result, stats = service.run(detections)
+    result, stats = service.run(detections, config=config)
     assert "after_clip" not in stats
     assert stats["output_count"] == 1
 

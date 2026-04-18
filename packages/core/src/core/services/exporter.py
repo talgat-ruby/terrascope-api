@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import geopandas as gpd
+from pyproj import Geod
 
 from core.services.detector import RawDetection
 
@@ -40,7 +41,10 @@ class GISExporterService:
         ]
 
         gdf = gpd.GeoDataFrame(records, geometry="geometry", crs=crs)
-        gdf["area_m2"] = gdf.geometry.area
+        geod = Geod(ellps="WGS84")
+        gdf["area_m2"] = gdf.geometry.apply(
+            lambda g: abs(geod.geometry_area_perimeter(g)[0])
+        )
         return gdf
 
     def export_geojson(self, gdf: gpd.GeoDataFrame, path: str | Path) -> Path:

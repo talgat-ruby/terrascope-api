@@ -36,6 +36,7 @@ class SamGeoModel:
         self,
         tile_data: NDArray[np.float32],
         transform: Affine,
+        crs: str = "EPSG:4326",
     ) -> dict[str, NDArray[np.float32]]:
         """Run SAM inference on a tile, returning building probability mask.
 
@@ -69,7 +70,7 @@ class SamGeoModel:
                 width=width,
                 count=bands,
                 dtype="float32",
-                crs="EPSG:4326",
+                crs=crs,
                 transform=transform,
             ) as dst:
                 dst.write(tile_data[:bands])

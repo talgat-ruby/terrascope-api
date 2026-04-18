@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass, replace
 
+from pyproj import Geod
 from shapely.geometry.base import BaseGeometry
 from shapely.strtree import STRtree
 
@@ -16,7 +17,7 @@ class PostprocessingConfig:
     confidence_threshold: int = 50
     min_area_m2: float = 10.0
     max_area_m2: float = 1_000_000.0
-    simplify_tolerance: float = 1.0
+    simplify_tolerance_m: float = 1.0
 
 
 class PostprocessorService:
@@ -114,24 +115,23 @@ class PostprocessorService:
     def filter_by_size(
         self,
         detections: list[RawDetection],
-        min_area: float = 10.0,
-        max_area: float = 1_000_000.0,
+        min_area_m2: float = 10.0,
+        max_area_m2: float = 1_000_000.0,
     ) -> list[RawDetection]:
-        """Remove detections outside the area range.
+        """Remove detections outside the area range (geodesic m2).
 
-        Note: geometry.area is in CRS units (degrees for EPSG:4326).
-        Accurate m2 filtering requires reprojection, which happens
-        downstream. This provides a rough filter using raw geometry area.
+        Uses WGS84 ellipsoid for accurate area computation from
+        geographic coordinates.
         """
-        return [
-            d
-            for d in detections
-            if d.geometry.area > 0 and min_area <= d.geometry.area <= max_area
-        ]
+        geod = Geod(ellps="WGS84")
+        result: list[RawDetection] = []
+        for d in detections:
+            area_m2 = abs(geod.geometry_area_perimeter(d.geometry)[0])
+            if area_m2 > 0 and min_area_m2 <= area_m2 <= max_area_m2:
+                result.append(d)
+        return result
 
-    def filter_by_shape(
-        self, detections: list[RawDetection]
-    ) -> list[RawDetection]:
+    def filter_by_shape(self, detections: list[RawDetection]) -> list[RawDetection]:
         """Remove invalid or degenerate geometries."""
         result: list[RawDetection] = []
         for d in detections:
@@ -150,20 +150,22 @@ class PostprocessorService:
         return result
 
     def simplify_geometries(
-        self, detections: list[RawDetection], tolerance: float = 1.0
+        self, detections: list[RawDetection], tolerance_m: float = 1.0
     ) -> list[RawDetection]:
         """Simplify detection geometries using Douglas-Peucker.
 
         Args:
             detections: List of detections.
-            tolerance: Simplification tolerance in CRS units.
+            tolerance_m: Simplification tolerance in meters. Converted to
+                approximate degrees for geographic CRS (1m ~ 1/111320 degrees).
 
         Returns:
             Detections with simplified geometries.
         """
+        tolerance_deg = tolerance_m / 111_320.0
         result: list[RawDetection] = []
         for d in detections:
-            simplified = d.geometry.simplify(tolerance, preserve_topology=True)
+            simplified = d.geometry.simplify(tolerance_deg, preserve_topology=True)
             if simplified.is_empty:
                 continue
             result.append(replace(d, geometry=simplified))
@@ -219,10 +221,13 @@ class PostprocessorService:
         result = self.filter_by_confidence(result, cfg.confidence_threshold)
         stats["after_confidence_filter"] = len(result)
 
+        result = self.filter_by_size(result, cfg.min_area_m2, cfg.max_area_m2)
+        stats["after_size_filter"] = len(result)
+
         result = self.filter_by_shape(result)
         stats["after_shape_filter"] = len(result)
 
-        result = self.simplify_geometries(result, cfg.simplify_tolerance)
+        result = self.simplify_geometries(result, cfg.simplify_tolerance_m)
         stats["after_simplify"] = len(result)
 
         if aoi is not None:

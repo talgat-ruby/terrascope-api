@@ -65,6 +65,9 @@ alembic upgrade head
 - **Temporal workflows** - workflow is a `@workflow.defn` class; activities are standalone `@activity.defn` async functions
 - **Dependency injection** - FastAPI `Depends()` for DB sessions (`get_db()`) and Temporal client (`get_temporal_client()`)
 - **Config** - pydantic-settings `Settings` class in `core/config.py`, reads from `.env`
+- **CRS propagation** - CRS is passed explicitly through the pipeline: `clip_to_aoi()` returns CRS string, `Tile` has `crs` field, model wrappers accept `crs` param
+- **Geodesic accuracy** - use `pyproj.Geod(ellps="WGS84")` for area/distance computations on geographic coordinates, not raw `geometry.area`
+- **Blocking I/O in async** - wrap blocking libs (rasterio, pystac-client) in `asyncio.to_thread()` at the async boundary
 
 ## Code Style
 

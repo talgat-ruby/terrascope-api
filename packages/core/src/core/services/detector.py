@@ -68,7 +68,7 @@ class DetectorService:
 
         # SAMGeo: instance segmentation for buildings
         if self._samgeo is not None:
-            probs = self._samgeo.predict(tile.data, tile.transform)
+            probs = self._samgeo.predict(tile.data, tile.transform, tile.crs)
             for class_name, prob_mask in probs.items():
                 if class_name in CLASS_REGISTRY:
                     masked = prob_mask * tile.valid_mask

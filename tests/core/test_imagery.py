@@ -82,12 +82,15 @@ def test_clip_to_aoi(service, synthetic_geotiff, sample_aoi):
     path, original_data, _ = synthetic_geotiff
     dataset = service.load(path)
     try:
-        clipped_data, clipped_transform = service.clip_to_aoi(dataset, sample_aoi)
+        clipped_data, clipped_transform, clipped_crs = service.clip_to_aoi(
+            dataset, sample_aoi
+        )
         assert clipped_data.dtype == np.float32
         assert clipped_data.shape[0] == 3  # same band count
         assert clipped_data.shape[1] < original_data.shape[1]  # smaller height
         assert clipped_data.shape[2] < original_data.shape[2]  # smaller width
         assert clipped_transform is not None
+        assert clipped_crs == "EPSG:4326"
     finally:
         dataset.close()
 
@@ -105,11 +108,14 @@ def test_clip_to_aoi_crs_mismatch(service, synthetic_geotiff):
 
     dataset = service.load(path)
     try:
-        clipped_data, _ = service.clip_to_aoi(dataset, aoi_3857, aoi_crs="EPSG:3857")
+        clipped_data, _, clipped_crs = service.clip_to_aoi(
+            dataset, aoi_3857, aoi_crs="EPSG:3857"
+        )
         assert clipped_data.dtype == np.float32
         assert clipped_data.shape[0] == 3
         assert clipped_data.shape[1] > 0
         assert clipped_data.shape[2] > 0
+        assert clipped_crs == "EPSG:4326"
     finally:
         dataset.close()
 

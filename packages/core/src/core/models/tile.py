@@ -12,3 +12,4 @@ class Tile:
     transform: Affine
     data: NDArray[np.float32]
     valid_mask: NDArray[np.bool_]
+    crs: str = "EPSG:4326"

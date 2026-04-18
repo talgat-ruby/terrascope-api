@@ -1,6 +1,9 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from geoalchemy2.shape import to_shape
+from shapely.geometry import mapping
+from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
@@ -13,19 +16,33 @@ from core.models.quality import QualityMetrics
 router = APIRouter()
 
 
+async def _check_job_exists(job_id: uuid.UUID, db: AsyncSession) -> None:
+    result = await db.execute(select(ProcessingJob).where(ProcessingJob.id == job_id))
+    if result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+
 @router.get("/{job_id}/detections")
 async def get_detections(
     job_id: uuid.UUID,
     class_name: str | None = Query(None, alias="class"),
     confidence_min: int | None = Query(None, ge=0, le=100),
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
+    await _check_job_exists(job_id, db)
+
     stmt = select(Detection).where(Detection.job_id == job_id)
     if class_name:
         stmt = stmt.where(Detection.class_name == class_name)
     if confidence_min is not None:
         stmt = stmt.where(Detection.confidence >= confidence_min)
 
+    count_stmt = select(func.count()).select_from(stmt.subquery())
+    total = (await db.execute(count_stmt)).scalar_one()
+
+    stmt = stmt.offset(offset).limit(limit)
     result = await db.execute(stmt)
     detections = result.scalars().all()
 
@@ -42,10 +59,15 @@ async def get_detections(
                     "area_m2": d.area_m2,
                     "length_m": d.length_m,
                 },
-                "geometry": None,  # TODO: convert from WKB via ST_AsGeoJSON
+                "geometry": mapping(to_shape(d.geometry)) if d.geometry else None,
             }
             for d in detections
         ],
+        "pagination": {
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        },
     }
 
 
@@ -54,8 +76,11 @@ async def download_results(
     job_id: uuid.UUID,
     format: str = Query("geojson", pattern="^(geojson|gpkg|shp)$"),
 ) -> dict:
-    # TODO Phase 5: Return FileResponse with exported file
-    return {"status": "not_implemented", "message": "Export will be available in Phase 5"}
+    # Deferred to Phase 7: requires export_results activity to write files first
+    return {
+        "status": "not_implemented",
+        "message": "Export will be available in Phase 7",
+    }
 
 
 @router.get("/{job_id}/indicators")
@@ -63,6 +88,8 @@ async def get_indicators(
     job_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
 ) -> list[dict]:
+    await _check_job_exists(job_id, db)
+
     result = await db.execute(
         select(ZoneIndicator).where(ZoneIndicator.job_id == job_id)
     )
@@ -84,6 +111,8 @@ async def get_quality(
     job_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
+    await _check_job_exists(job_id, db)
+
     result = await db.execute(
         select(QualityMetrics).where(QualityMetrics.job_id == job_id)
     )

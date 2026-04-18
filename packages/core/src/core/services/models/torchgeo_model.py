@@ -6,10 +6,10 @@ from numpy.typing import NDArray
 
 
 class TorchGeoModel:
-    """Wraps a torchgeo pretrained semantic segmentation model.
+    """Wraps a torchgeo FCN semantic segmentation model.
 
     Produces per-pixel class probabilities for land cover classes:
-    vegetation, road, water.
+    vegetation, road, water. Channel 0 is background.
     """
 
     CLASSES: list[str] = ["vegetation", "road", "water"]
@@ -18,14 +18,20 @@ class TorchGeoModel:
         self.device = torch.device(device)
         self._model: torch.nn.Module | None = None
 
-    def load(self) -> None:
-        """Load the pretrained segmentation model.
+    def load(self, in_channels: int = 3) -> None:
+        """Load the FCN segmentation model.
 
-        Uses torchgeo's pretrained ResNet-based segmentation.
+        Uses torchgeo's FCN which produces per-pixel class logits
+        of shape (batch, classes, H, W). No pretrained weights exist
+        for this 3-class task -- model requires fine-tuning.
+
+        Args:
+            in_channels: Number of input bands (default 3 for RGB).
         """
-        from torchgeo.models import ResNet18_Weights, resnet18
+        from torchgeo.models import FCN
 
-        self._model = resnet18(weights=ResNet18_Weights.SENTINEL2_ALL_MOCO)
+        num_classes = len(self.CLASSES) + 1  # +1 for background at index 0
+        self._model = FCN(in_channels=in_channels, classes=num_classes)
         self._model.to(self.device)
         self._model.eval()
 
@@ -44,20 +50,15 @@ class TorchGeoModel:
 
         with torch.no_grad():
             tensor = torch.from_numpy(tile_data).unsqueeze(0).to(self.device)
-            output = self._model(tensor)
-
-            if isinstance(output, dict):
-                logits = output.get("out", output.get("logits", next(iter(output.values()))))
-            else:
-                logits = output
-
+            logits = self._model(tensor)
             probs = torch.softmax(logits, dim=1).squeeze(0).cpu().numpy()
 
         results: dict[str, NDArray[np.float32]] = {}
-        n_output_classes = probs.shape[0]
+        n_output_channels = probs.shape[0]
         for i, class_name in enumerate(self.CLASSES):
-            if i < n_output_classes:
-                results[class_name] = probs[i].astype(np.float32)
+            class_idx = i + 1  # skip background channel at index 0
+            if class_idx < n_output_channels:
+                results[class_name] = probs[class_idx].astype(np.float32)
             else:
                 results[class_name] = np.zeros(
                     (tile_data.shape[1], tile_data.shape[2]), dtype=np.float32
