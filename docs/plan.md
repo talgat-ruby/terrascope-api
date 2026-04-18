@@ -60,42 +60,22 @@ Build a prototype for extracting objects/features from satellite imagery and gen
 
 ---
 
-## Phase 4: Post-Processing
+## Phase 4: Post-Processing -- COMPLETED
 
-**Goal**: Merge tiles, NMS, filter false positives, simplify.
-
-### Files to create
-
-- `packages/core/src/core/services/postprocessor.py` -- `PostprocessorService`
-  - `merge_tile_detections(tile_detections)`
-  - `apply_nms(detections, iou_threshold)` -- STRtree spatial index
-  - `filter_by_size`, `filter_by_confidence`, `filter_by_shape`
-  - `simplify_geometries(detections, tolerance)`
-  - `clip_to_aoi(detections, aoi)`
-  - `run(detections, config) -> (list[Detection], stats_dict)`
-
-### Tests
-
-- `tests/core/test_postprocessor.py`
+- `PostprocessorService` (`services/postprocessor.py`): `merge_tile_detections()` flattens per-tile lists, `apply_nms()` uses STRtree spatial index with per-class IoU suppression (higher confidence wins), `filter_by_confidence()`, `filter_by_size()`, `filter_by_shape()` (removes slivers with aspect > 100), `simplify_geometries()` via Douglas-Peucker, `clip_to_aoi()` clips/removes detections outside AOI
+- `PostprocessingConfig` dataclass: iou_threshold, confidence_threshold, min/max_area_m2, simplify_tolerance
+- `run()` orchestrator: NMS → confidence filter → shape filter → simplify → clip (optional), returns `(detections, stats_dict)` with counts at each step
+- Uses `dataclasses.replace()` for immutable detection updates
+- 15 postprocessor tests (51 total passing)
 
 ---
 
-## Phase 5: GIS Export
+## Phase 5: GIS Export -- COMPLETED
 
-**Goal**: GeoJSON (mandatory), GeoPackage, Shapefile export with proper attributes.
-
-### Files to create
-
-- `packages/core/src/core/services/exporter.py` -- `GISExporterService`
-  - `to_geodataframe(detections, crs)` -- id, class, confidence, source, geometry, area_m2, length_m, date, change_flag
-  - `export_geojson(gdf, path)` -- WGS84 for RFC 7946
-  - `export_geopackage(gdf, path)` / `export_shapefile(gdf, path)`
-  - `export_all(detections, crs, output_dir)`
-  - `generate_qgis_project(layers, imagery_path, output_path)` -- .qgs XML
-
-### Tests
-
-- `tests/core/test_exporter.py` -- round-trip, CRS, attributes
+- `GISExporterService` (`services/exporter.py`): `to_geodataframe()` converts `RawDetection` list to GeoDataFrame with class_name/confidence/source/geometry/area_m2 columns, `export_geojson()` always reprojects to WGS84 (RFC 7946), `export_geopackage()`, `export_shapefile()`, `export_all()` writes all three formats and returns format→path mapping
+- `generate_qgis_project` deferred -- can be added later as XML generation
+- area_m2 uses raw geometry area (geographic CRS); accurate m2 requires reprojection to projected CRS downstream
+- 8 exporter tests covering round-trip read-back, CRS enforcement, empty input (59 total passing)
 
 ---
 
