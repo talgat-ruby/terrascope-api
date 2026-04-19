@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from pydantic import computed_field, model_validator
+from pydantic import Field, computed_field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -63,7 +63,11 @@ class Settings(BaseSettings):
 
     # ML model
     model_name: str = "torchgeo"
-    device: str = "cpu"
+    device: str = Field(default_factory=lambda: (
+        __import__("torch").cuda.is_available() and "cuda" or 
+        (hasattr(__import__("torch").backends, "mps") and __import__("torch").backends.mps.is_available() and "mps") or 
+        "cpu"
+    ) if __import__("importlib.util").util.find_spec("torch") else "cpu")
 
     # STAC
     stac_api_url: str = "https://earth-search.aws.element84.com/v1"
