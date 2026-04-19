@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from pydantic import computed_field
+from pydantic import computed_field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -67,6 +67,18 @@ class Settings(BaseSettings):
 
     # STAC
     stac_api_url: str = "https://earth-search.aws.element84.com/v1"
+
+    @model_validator(mode="after")
+    def _check_consistency(self) -> "Settings":
+        if self.min_area_m2 >= self.max_area_m2:
+            raise ValueError("min_area_m2 must be less than max_area_m2")
+        if not 0 <= self.nms_iou_threshold <= 1:
+            raise ValueError("nms_iou_threshold must be between 0 and 1")
+        if not 0 <= self.confidence_threshold <= 100:
+            raise ValueError("confidence_threshold must be between 0 and 100")
+        if self.tile_overlap >= self.tile_size:
+            raise ValueError("tile_overlap must be less than tile_size")
+        return self
 
 
 settings = Settings()

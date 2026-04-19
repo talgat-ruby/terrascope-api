@@ -1,14 +1,19 @@
+import logging
 import uuid
+from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
+from temporalio.client import Client
 
 from api.dependencies import get_db, get_temporal_client
 from core.config import settings
 from core.models.processing import JobStatus, ProcessingJob
 from core.schemas.processing import ProcessingRequest, ProcessingStatusResponse
 from worker.workflows.processing import ProcessingWorkflow
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -17,6 +22,7 @@ router = APIRouter()
 async def start_processing(
     request: ProcessingRequest,
     db: AsyncSession = Depends(get_db),
+    temporal: Client = Depends(get_temporal_client),
 ) -> dict:
     job = ProcessingJob(
         input_path=request.input_path,
@@ -30,13 +36,23 @@ async def start_processing(
     await db.commit()
     await db.refresh(job)
 
-    client = await get_temporal_client()
-    await client.start_workflow(
-        ProcessingWorkflow.run,
-        str(job.id),
-        id=f"processing-{job.id}",
-        task_queue=settings.temporal_task_queue,
-    )
+    try:
+        await temporal.start_workflow(
+            ProcessingWorkflow.run,
+            str(job.id),
+            id=f"processing-{job.id}",
+            task_queue=settings.temporal_task_queue,
+            execution_timeout=timedelta(hours=24),
+        )
+    except Exception as exc:
+        logger.error("Failed to start workflow for job %s: %s", job.id, exc)
+        job.status = JobStatus.FAILED
+        job.error_message = f"Failed to start workflow: {exc}"
+        db.add(job)
+        await db.commit()
+        raise HTTPException(
+            status_code=500, detail="Failed to start processing workflow"
+        ) from exc
 
     return {"job_id": str(job.id), "status": job.status}
 
@@ -68,7 +84,9 @@ async def get_log(job_id: uuid.UUID, db: AsyncSession = Depends(get_db)) -> dict
 
 @router.post("/{job_id}/retry")
 async def retry_processing(
-    job_id: uuid.UUID, db: AsyncSession = Depends(get_db)
+    job_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    temporal: Client = Depends(get_temporal_client),
 ) -> dict:
     result = await db.execute(select(ProcessingJob).where(ProcessingJob.id == job_id))
     job = result.scalar_one_or_none()
@@ -86,13 +104,23 @@ async def retry_processing(
     db.add(job)
     await db.commit()
 
-    client = await get_temporal_client()
-    retry_id = uuid.uuid4()
-    await client.start_workflow(
-        ProcessingWorkflow.run,
-        str(job.id),
-        id=f"processing-{job.id}-retry-{retry_id}",
-        task_queue=settings.temporal_task_queue,
-    )
+    try:
+        retry_id = uuid.uuid4()
+        await temporal.start_workflow(
+            ProcessingWorkflow.run,
+            str(job.id),
+            id=f"processing-{job.id}-retry-{retry_id}",
+            task_queue=settings.temporal_task_queue,
+            execution_timeout=timedelta(hours=24),
+        )
+    except Exception as exc:
+        logger.error("Failed to start retry workflow for job %s: %s", job.id, exc)
+        job.status = JobStatus.FAILED
+        job.error_message = f"Failed to start retry workflow: {exc}"
+        db.add(job)
+        await db.commit()
+        raise HTTPException(
+            status_code=500, detail="Failed to start retry workflow"
+        ) from exc
 
     return {"job_id": str(job.id), "status": "retry_scheduled"}

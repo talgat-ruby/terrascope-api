@@ -21,6 +21,7 @@ dev = [
     "terrascope-worker",
     "terrascope-cli",
     "python-dotenv>=1.2.2",
+    "greenlet>=3.0.3",
 ]
 
 [tool.uv.sources]

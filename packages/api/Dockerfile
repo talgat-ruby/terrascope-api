@@ -32,8 +32,6 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 # Copy source code and install workspace packages.
 COPY packages/ packages/
-COPY alembic/ alembic/
-COPY alembic.ini .
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen
@@ -64,10 +62,6 @@ WORKDIR /app
 
 # Copy the virtual environment from the builder stage.
 COPY --from=builder /app/.venv /app/.venv
-
-# Copy alembic for database migrations.
-COPY --from=builder /app/alembic /app/alembic
-COPY --from=builder /app/alembic.ini /app/alembic.ini
 
 # Create writable directories for uploads and output.
 RUN mkdir -p /app/uploads /app/output && chown -R appuser:appuser /app/uploads /app/output

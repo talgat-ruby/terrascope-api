@@ -11,11 +11,14 @@ with workflow.unsafe.imports_passed_through():
     from worker.activities.indicators import compute_indicators
     from worker.activities.postprocessing import postprocess
 
+_non_retryable = ["FileNotFoundError", "ValueError"]
+
 _default_retry = RetryPolicy(
     initial_interval=timedelta(seconds=1),
     backoff_coefficient=2.0,
     maximum_interval=timedelta(seconds=60),
     maximum_attempts=3,
+    non_retryable_error_types=_non_retryable,
 )
 
 _ml_retry = RetryPolicy(
@@ -23,6 +26,7 @@ _ml_retry = RetryPolicy(
     backoff_coefficient=2.0,
     maximum_interval=timedelta(seconds=120),
     maximum_attempts=5,
+    non_retryable_error_types=_non_retryable,
 )
 
 

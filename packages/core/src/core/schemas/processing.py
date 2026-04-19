@@ -1,16 +1,38 @@
 import uuid
 from datetime import datetime
+from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+from shapely.geometry import shape
+from shapely.validation import explain_validity
 
 from core.models.processing import JobStatus
 
 
+def _validate_polygon(v: dict[str, Any]) -> dict[str, Any]:
+    try:
+        geom = shape(v)
+    except Exception as exc:
+        raise ValueError(f"Invalid GeoJSON geometry: {exc}") from exc
+    if geom.geom_type not in ("Polygon", "MultiPolygon"):
+        raise ValueError(
+            f"Expected Polygon or MultiPolygon, got {geom.geom_type}"
+        )
+    if not geom.is_valid:
+        raise ValueError(f"Invalid geometry: {explain_validity(geom)}")
+    return v
+
+
 class ProcessingRequest(BaseModel):
     input_path: str
-    aoi: dict  # GeoJSON polygon for area of interest
+    aoi: dict[str, Any]
     aoi_crs: str = Field(default="EPSG:4326")
-    config: dict | None = None  # Optional overrides for processing settings
+    config: dict | None = None
+
+    @field_validator("aoi")
+    @classmethod
+    def validate_aoi(cls, v: dict[str, Any]) -> dict[str, Any]:
+        return _validate_polygon(v)
 
 
 class ProcessingStatusResponse(BaseModel):
