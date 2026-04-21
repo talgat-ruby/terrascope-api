@@ -74,6 +74,10 @@ class ImageryLoaderService:
 
         return out_image.astype(np.float32), out_transform, str(dataset.crs)
 
+    def get_bounds_geometry(self, dataset: rasterio.DatasetReader) -> BaseGeometry:
+        """Return the full extent of the raster as a Shapely polygon in the dataset's CRS."""
+        return shapely_box(*dataset.bounds)
+
     def get_metadata(self, dataset: rasterio.DatasetReader) -> dict:
         """Extract raster metadata.
 

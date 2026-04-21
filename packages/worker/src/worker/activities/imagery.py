@@ -32,9 +32,13 @@ async def load_imagery(job_id: str) -> dict:
             try:
                 metadata = await asyncio.to_thread(loader.get_metadata, dataset)
 
-                aoi_geojson = job.config["aoi"]  # type: ignore[index]
-                aoi_crs = job.config.get("aoi_crs", "EPSG:4326")  # type: ignore[union-attr]
-                aoi_geom = shapely_shape(aoi_geojson)
+                aoi_geojson = (job.config or {}).get("aoi")
+                if aoi_geojson is not None:
+                    aoi_crs = job.config.get("aoi_crs", "EPSG:4326")  # type: ignore[union-attr]
+                    aoi_geom = shapely_shape(aoi_geojson)
+                else:
+                    aoi_geom = loader.get_bounds_geometry(dataset)
+                    aoi_crs = str(dataset.crs)
 
                 data, transform, crs = await asyncio.to_thread(
                     loader.clip_to_aoi, dataset, aoi_geom, aoi_crs

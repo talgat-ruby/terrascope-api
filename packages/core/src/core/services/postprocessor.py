@@ -3,6 +3,7 @@
 from dataclasses import dataclass, replace
 
 from pyproj import Geod
+from shapely import MultiPolygon, Polygon
 from shapely.geometry.base import BaseGeometry
 from shapely.strtree import STRtree
 
@@ -166,7 +167,7 @@ class PostprocessorService:
         result: list[RawDetection] = []
         for d in detections:
             simplified = d.geometry.simplify(tolerance_deg, preserve_topology=True)
-            if simplified.is_empty:
+            if simplified.is_empty or not isinstance(simplified, (Polygon, MultiPolygon)):
                 continue
             result.append(replace(d, geometry=simplified))
         return result
@@ -191,7 +192,7 @@ class PostprocessorService:
             if not d.geometry.intersects(aoi):
                 continue
             clipped = d.geometry.intersection(aoi)
-            if clipped.is_empty:
+            if clipped.is_empty or not isinstance(clipped, (Polygon, MultiPolygon)):
                 continue
             result.append(replace(d, geometry=clipped))
         return result

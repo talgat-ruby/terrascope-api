@@ -25,13 +25,18 @@ def _validate_polygon(v: dict[str, Any]) -> dict[str, Any]:
 
 class ProcessingRequest(BaseModel):
     input_path: str
-    aoi: dict[str, Any]
+    aoi: dict[str, Any] | None = Field(
+        default=None,
+        description="AOI GeoJSON geometry. If omitted, the full extent of the input raster is used.",
+    )
     aoi_crs: str = Field(default="EPSG:4326")
     config: dict | None = None
 
     @field_validator("aoi")
     @classmethod
-    def validate_aoi(cls, v: dict[str, Any]) -> dict[str, Any]:
+    def validate_aoi(cls, v: dict[str, Any] | None) -> dict[str, Any] | None:
+        if v is None:
+            return v
         return _validate_polygon(v)
 
 

@@ -2,6 +2,7 @@ import enum
 import uuid
 from datetime import UTC, datetime
 
+from sqlalchemy import DateTime
 from sqlmodel import JSON, Column, Field, SQLModel
 
 
@@ -28,6 +29,15 @@ class ProcessingJob(SQLModel, table=True):
     current_step: str | None = None
     checkpoint_data: dict | None = Field(default=None, sa_column=Column(JSON))
     error_message: str | None = None
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC), index=True)
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    completed_at: datetime | None = None
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(DateTime(timezone=True), nullable=False, index=True),
+    )
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+    completed_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )

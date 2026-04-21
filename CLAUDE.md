@@ -14,7 +14,7 @@ packages/
   api/     # FastAPI application and routers
   worker/  # Temporal workflows and activities
   cli/     # Typer CLI tool
-alembic/   # Database migrations
+  core/alembic/  # Database migrations (inside core package)
 infra/     # Docker Compose configs (Postgres, Temporal, Elasticsearch)
 tests/     # Mirrors packages/ structure
 docs/      # Assignment spec and implementation plan
@@ -25,8 +25,8 @@ docs/      # Assignment spec and implementation plan
 ```bash
 uv sync
 cp .env.example .env
-docker compose -f infra/compose/compose.yml up -d
-alembic upgrade head
+docker compose -f infra/compose/compose.yml --env-file .env up -d
+uv run alembic -c packages/core/src/core/alembic.ini upgrade head
 ```
 
 ## Common Commands
@@ -52,8 +52,8 @@ uvx ruff format .
 uvx pyright
 
 # Database migration
-alembic revision --autogenerate -m "description"
-alembic upgrade head
+uv run alembic -c packages/core/src/core/alembic.ini revision --autogenerate -m "description"
+uv run alembic -c packages/core/src/core/alembic.ini upgrade head
 ```
 
 ## Architecture & Conventions
@@ -106,4 +106,4 @@ alembic upgrade head
 
 The full implementation plan with phases, steps, and status is in `docs/plan.md`. Always refer to it before starting work on a phase or step.
 
-Phases 1-9 are complete. Phase 10 (testing, Docker & documentation) is next.
+Phases 1-10 are complete. AOI is now optional in both CLI and API (falls back to full raster extent).

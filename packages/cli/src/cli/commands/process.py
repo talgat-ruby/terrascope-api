@@ -13,7 +13,9 @@ app = typer.Typer(help="Process satellite imagery")
 @app.callback(invoke_without_command=True)
 def run(
     input: Path = typer.Option(..., "--input", "-i", help="Path to GeoTIFF file"),
-    aoi: Path = typer.Option(..., "--aoi", "-a", help="Path to AOI GeoJSON file"),
+    aoi: Path | None = typer.Option(
+        None, "--aoi", "-a", help="Path to AOI GeoJSON file (uses full raster extent if omitted)"
+    ),
     output: Path = typer.Option("./output", "--output", "-o", help="Output directory"),
     use_temporal: bool = typer.Option(
         False, "--use-temporal", help="Submit to Temporal instead of running locally"
@@ -26,7 +28,7 @@ def run(
         _run_local(input, aoi, output)
 
 
-def _run_local(input_path: Path, aoi_path: Path, output_dir: Path) -> None:
+def _run_local(input_path: Path, aoi_path: Path | None, output_dir: Path) -> None:
     """Run the full processing pipeline locally using core services."""
     from core.services.detector import DetectorService
     from core.services.exporter import GISExporterService
@@ -34,9 +36,6 @@ def _run_local(input_path: Path, aoi_path: Path, output_dir: Path) -> None:
     from core.services.indicators import IndicatorCalculatorService
     from core.services.postprocessor import PostprocessingConfig, PostprocessorService
     from core.services.tiler import TilerService
-
-    aoi_geojson = json.loads(aoi_path.read_text())
-    aoi_geom = shapely_shape(aoi_geojson)
 
     # Step 1: Load imagery
     typer.echo("Loading imagery...")
@@ -48,7 +47,14 @@ def _run_local(input_path: Path, aoi_path: Path, output_dir: Path) -> None:
             f"  Bands: {metadata['band_count']}, CRS: {metadata['crs']}, "
             f"Resolution: {metadata['resolution']}"
         )
-        data, transform, crs = loader.clip_to_aoi(dataset, aoi_geom)
+        if aoi_path is not None:
+            aoi_geojson = json.loads(aoi_path.read_text())
+            aoi_geom = shapely_shape(aoi_geojson)
+            data, transform, crs = loader.clip_to_aoi(dataset, aoi_geom)
+        else:
+            aoi_geom = loader.get_bounds_geometry(dataset)
+            typer.echo("  No AOI provided, using full raster extent")
+            data, transform, crs = loader.clip_to_aoi(dataset, aoi_geom, aoi_crs=str(dataset.crs))
     finally:
         dataset.close()
     typer.echo(f"  Clipped shape: {data.shape}")
@@ -61,8 +67,9 @@ def _run_local(input_path: Path, aoi_path: Path, output_dir: Path) -> None:
 
     # Step 3: Detect objects
     typer.echo("Running detection...")
+    in_channels = data.shape[0]
     detector = DetectorService(device=settings.device)
-    detector.load_models()
+    detector.load_models(in_channels=in_channels)
     all_detections = []
     for i, tile in enumerate(tiles):
         tile_dets = detector.predict_tile(tile)
@@ -112,7 +119,7 @@ def _run_local(input_path: Path, aoi_path: Path, output_dir: Path) -> None:
     typer.echo("Done!")
 
 
-async def _run_temporal(input_path: Path, aoi_path: Path, output_dir: Path) -> None:
+async def _run_temporal(input_path: Path, aoi_path: Path | None, output_dir: Path) -> None:
     """Submit processing to Temporal workflow."""
     from temporalio.client import Client
 
@@ -120,7 +127,7 @@ async def _run_temporal(input_path: Path, aoi_path: Path, output_dir: Path) -> N
     from core.models.processing import ProcessingJob
     from worker.workflows.processing import ProcessingWorkflow
 
-    aoi_geojson = json.loads(aoi_path.read_text())
+    aoi_geojson = json.loads(aoi_path.read_text()) if aoi_path is not None else None
 
     async with async_session_factory() as session:
         job = ProcessingJob(

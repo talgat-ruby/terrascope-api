@@ -24,13 +24,13 @@ async def start_processing(
     db: AsyncSession = Depends(get_db),
     temporal: Client = Depends(get_temporal_client),
 ) -> dict:
+    config: dict = {**(request.config or {})}
+    if request.aoi is not None:
+        config["aoi"] = request.aoi
+        config["aoi_crs"] = request.aoi_crs
     job = ProcessingJob(
         input_path=request.input_path,
-        config={
-            "aoi": request.aoi,
-            "aoi_crs": request.aoi_crs,
-            **(request.config or {}),
-        },
+        config=config,
     )
     db.add(job)
     await db.commit()

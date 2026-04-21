@@ -38,9 +38,9 @@ Key infrastructure: PostgreSQL + PostGIS for storage, Temporal for workflow orch
 | Input              | Format                     | Requirements                                |
 |--------------------|----------------------------|---------------------------------------------|
 | Satellite imagery  | GeoTIFF (3-band RGB)       | Must have CRS and geotransform              |
-| Area of interest   | GeoJSON polygon            | Any CRS (auto-reprojected if needed)        |
+| Area of interest   | GeoJSON polygon            | Optional; any CRS (auto-reprojected if needed) |
 
-The system validates CRS presence at load time and raises an error for non-georeferenced files. If the AOI is in a different CRS than the imagery, automatic reprojection is performed via `pyproj.Transformer`.
+The system validates CRS presence at load time and raises an error for non-georeferenced files. If the AOI is in a different CRS than the imagery, automatic reprojection is performed via `pyproj.Transformer`. When no AOI is provided, the full extent of the input raster is used automatically.
 
 ### 2.2 Coordinate Reference System
 
@@ -75,7 +75,7 @@ The system implements a 6-step pipeline, available both as a local CLI command a
 Load Imagery -> Tile -> Detect Objects -> Post-process -> Export -> Compute Indicators
 ```
 
-1. **Load imagery:** Validate CRS, clip raster to AOI using `rasterio.mask.mask(crop=True)`
+1. **Load imagery:** Validate CRS, clip raster to AOI (or full extent if no AOI provided) using `rasterio.mask.mask(crop=True)`
 2. **Tile:** Split into overlapping tiles (default 512x512, overlap 64px) with zero-padding at edges; `valid_mask` tracks real vs padded pixels
 3. **Detect objects:** Run ML inference per tile, convert probability masks to vector polygons
 4. **Post-process:** NMS, filtering (confidence, size, shape), simplification, AOI clipping

@@ -33,10 +33,10 @@ class DetectorService:
         self._torchgeo: TorchGeoModel | None = None
         self._samgeo: SamGeoModel | None = None
 
-    def load_models(self) -> None:
+    def load_models(self, in_channels: int = 3) -> None:
         """Load all ML models."""
         self._torchgeo = TorchGeoModel(device=self.device)
-        self._torchgeo.load()
+        self._torchgeo.load(in_channels=in_channels)
 
         self._samgeo = SamGeoModel(device=self.device)
         self._samgeo.load()
@@ -141,6 +141,8 @@ class DetectorService:
 
             polygon = shape(geom_dict)
             if not polygon.is_valid or polygon.is_empty:
+                continue
+            if polygon.geom_type not in ("Polygon", "MultiPolygon"):
                 continue
 
             confidence = self._assign_confidence(polygon, prob_mask, transform)

@@ -143,16 +143,27 @@ Build a prototype for extracting objects/features from satellite imagery and gen
 
 ---
 
+## Post-Phase: Optional AOI
+
+- `ImageryLoaderService.get_bounds_geometry()`: returns full raster extent as Shapely polygon
+- `ProcessingRequest.aoi` is now optional (`None` by default); when omitted, the full raster extent is used
+- CLI `--aoi` flag is optional; prints "No AOI provided, using full raster extent" when omitted
+- Worker `load_imagery` activity derives AOI from dataset bounds when `aoi` is missing from job config
+- API `/processing/start` only includes `aoi`/`aoi_crs` in job config when explicitly provided
+
+---
+
 ## Verification Plan
 
 1. `uv sync` -- all workspace packages resolve
 2. `docker compose -f infra/compose/compose.yml up` -- postgres, temporal, ES, UI start
-3. `alembic upgrade head` -- PostGIS tables created
+3. `uv run alembic -c packages/core/src/core/alembic.ini upgrade head` -- PostGIS tables created
 4. `pytest` after each phase
 5. Upload GeoTIFF via API -> Temporal workflow completes -> PostGIS has detections
 6. Download GeoJSON -> open in QGIS -> CRS aligns with basemap
-7. CLI: `terrascope process --input sample.tif --aoi aoi.geojson --output ./out/`
-8. Kill workflow mid-step -> restart -> resumes from checkpoint
+7. CLI: `terrascope process --input sample.tif --output ./out/` (AOI optional)
+8. CLI: `terrascope process --input sample.tif --aoi aoi.geojson --output ./out/`
+9. Kill workflow mid-step -> restart -> resumes from checkpoint
 
 ---
 

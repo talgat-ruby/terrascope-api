@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 
 from geoalchemy2 import Geometry
-from sqlalchemy import Column
+from sqlalchemy import Column, DateTime
 from sqlmodel import Field, SQLModel
 
 CLASS_REGISTRY: dict[str, dict] = {
@@ -43,5 +43,8 @@ class Detection(SQLModel, table=True):
     )
     area_m2: float | None = None
     length_m: float | None = None
-    date: datetime | None = None
+    date: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
     change_flag: bool | None = None

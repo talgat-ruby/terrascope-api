@@ -21,7 +21,7 @@ packages/
   api/     # FastAPI application and routers (+ Dockerfile)
   worker/  # Temporal workflows and activities (+ Dockerfile)
   cli/     # Typer CLI tool
-alembic/   # Database migrations
+  core/alembic/  # Database migrations (inside core package)
 infra/     # Docker Compose (Postgres, Temporal, Elasticsearch)
 tests/     # Test suite (mirrors packages/ structure)
 docs/      # Technical report, assignment spec, implementation plan
@@ -56,10 +56,10 @@ uv sync
 cp .env.example .env
 
 # Start infrastructure (Postgres, Temporal, Elasticsearch)
-docker compose -f infra/compose/compose.yml up -d
+docker compose -f infra/compose/compose.yml --env-file .env up -d
 
 # Run database migrations
-alembic upgrade head
+uv run alembic -c packages/core/src/core/alembic.ini upgrade head
 ```
 
 ## Development
@@ -72,25 +72,28 @@ uv run python -m api.main
 uv run python -m worker.main
 ```
 
-API docs available at http://localhost:30001/docs
+API docs available at <http://localhost:30001/docs>
 
 ## CLI
 
 ```bash
-# Local processing pipeline
-terrascope process --input image.tif --aoi aoi.geojson --output ./results
+# Local processing pipeline (AOI is optional -- uses full raster extent if omitted)
+uv run terrascope process --input image.tif --output ./results
+
+# Local processing with explicit AOI
+uv run terrascope process --input image.tif --aoi aoi.geojson --output ./results
 
 # Submit to Temporal workflow
-terrascope process --input image.tif --aoi aoi.geojson --use-temporal
+uv run terrascope process --input image.tif --aoi aoi.geojson --use-temporal
 
 # STAC catalog search
-terrascope stac search --bbox 10.0,49.0,11.0,50.0 --datetime 2024-01-01/2024-06-01
+uv run terrascope stac search --bbox 10.0,49.0,11.0,50.0 --datetime 2024-01-01/2024-06-01
 
 # Download STAC asset
-terrascope stac download --bbox 10.0,49.0,11.0,50.0 --output ./data
+uv run terrascope stac download --bbox 10.0,49.0,11.0,50.0 --output ./data
 
 # Quality evaluation against ground truth
-terrascope evaluate --predictions preds.geojson --ground-truth gt.geojson --report report.json
+uv run terrascope evaluate --predictions preds.geojson --ground-truth gt.geojson --report report.json
 ```
 
 ## Docker

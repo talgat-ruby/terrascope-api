@@ -23,12 +23,17 @@ class SamGeoModel:
         self._model = None  # type: ignore[assignment]
 
     def load(self) -> None:
-        """Load the SAM model."""
+        """Load the SAM model.
+
+        Forces CPU on MPS devices because SAM's mask generator uses float64
+        operations that MPS does not support.
+        """
         from samgeo import SamGeo
 
+        device = "cpu" if self.device == "mps" else self.device
         self._model = SamGeo(
             model_type=self.model_type,
-            device=self.device,
+            device=device,
             automatic=True,
         )
 
@@ -61,7 +66,16 @@ class SamGeoModel:
             input_path = Path(tmpdir) / "tile.tif"
             output_path = Path(tmpdir) / "mask.tif"
 
-            # Write tile as GeoTIFF (SAMGeo needs file input)
+            # Write tile as uint8 GeoTIFF (SAMGeo uses cv2.imread which can't read float32)
+            rgb_data = tile_data[:bands]
+            # Normalize to 0-255 uint8
+            dmin = rgb_data.min()
+            dmax = rgb_data.max()
+            if dmax - dmin > 0:
+                rgb_uint8 = ((rgb_data - dmin) / (dmax - dmin) * 255).astype(np.uint8)
+            else:
+                rgb_uint8 = np.zeros_like(rgb_data, dtype=np.uint8)
+
             with rasterio.open(
                 input_path,
                 "w",
@@ -69,11 +83,11 @@ class SamGeoModel:
                 height=height,
                 width=width,
                 count=bands,
-                dtype="float32",
+                dtype="uint8",
                 crs=crs,
                 transform=transform,
             ) as dst:
-                dst.write(tile_data[:bands])
+                dst.write(rgb_uint8)
 
             self._model.generate(str(input_path), output=str(output_path))
 
