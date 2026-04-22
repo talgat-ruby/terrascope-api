@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 import numpy as np
 import rasterio.features
+import scipy.ndimage
 from numpy.typing import NDArray
 from rasterio.transform import Affine
 from shapely.geometry import shape
@@ -131,6 +132,11 @@ class DetectorService:
 
         if not binary_mask.any():
             return []
+
+        # Fill in small holes and smooth edges before vectorization
+        binary_mask = scipy.ndimage.binary_closing(
+            binary_mask, structure=np.ones((3, 3))
+        ).astype(np.uint8)
 
         detections: list[RawDetection] = []
         for geom_dict, value in rasterio.features.shapes(

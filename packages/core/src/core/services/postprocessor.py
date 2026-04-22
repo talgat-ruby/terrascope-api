@@ -3,7 +3,7 @@
 from dataclasses import dataclass, replace
 
 from pyproj import Geod
-from shapely import MultiPolygon, Polygon
+from shapely import MultiPolygon, Polygon, make_valid
 from shapely.geometry.base import BaseGeometry
 from shapely.strtree import STRtree
 
@@ -16,7 +16,7 @@ class PostprocessingConfig:
 
     iou_threshold: float = 0.5
     confidence_threshold: int = 50
-    min_area_m2: float = 10.0
+    min_area_m2: float = 25.0
     max_area_m2: float = 1_000_000.0
     simplify_tolerance_m: float = 1.0
 
@@ -116,7 +116,7 @@ class PostprocessorService:
     def filter_by_size(
         self,
         detections: list[RawDetection],
-        min_area_m2: float = 10.0,
+        min_area_m2: float = 25.0,
         max_area_m2: float = 1_000_000.0,
     ) -> list[RawDetection]:
         """Remove detections outside the area range (geodesic m2).
@@ -189,9 +189,10 @@ class PostprocessorService:
         """
         result: list[RawDetection] = []
         for d in detections:
-            if not d.geometry.intersects(aoi):
+            geom = make_valid(d.geometry) if not d.geometry.is_valid else d.geometry
+            if not geom.intersects(aoi):
                 continue
-            clipped = d.geometry.intersection(aoi)
+            clipped = geom.intersection(aoi)
             if clipped.is_empty or not isinstance(clipped, (Polygon, MultiPolygon)):
                 continue
             result.append(replace(d, geometry=clipped))

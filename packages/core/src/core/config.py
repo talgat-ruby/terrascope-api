@@ -55,7 +55,7 @@ class Settings(BaseSettings):
 
     # Detection
     confidence_threshold: int = 50
-    min_area_m2: float = 10.0
+    min_area_m2: float = 25.0
     max_area_m2: float = 1_000_000.0
     min_length_m: float = 5.0
     nms_iou_threshold: float = 0.5
