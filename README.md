@@ -83,6 +83,12 @@ uv run terrascope process --input image.tif --output ./results
 # Local processing with explicit AOI
 uv run terrascope process --input image.tif --aoi aoi.geojson --output ./results
 
+# Resume interrupted pipeline (checkpoints are saved automatically)
+uv run terrascope process --input image.tif --output ./results
+
+# Force fresh run, ignoring existing checkpoints
+uv run terrascope process --input image.tif --output ./results --no-resume
+
 # Submit to Temporal workflow
 uv run terrascope process --input image.tif --aoi aoi.geojson --use-temporal
 
@@ -95,6 +101,22 @@ uv run terrascope stac download --bbox 10.0,49.0,11.0,50.0 --output ./data
 # Quality evaluation against ground truth
 uv run terrascope evaluate --predictions preds.geojson --ground-truth gt.geojson --report report.json
 ```
+
+### Checkpoint / Resume
+
+The local processing pipeline saves intermediate results to `{output_dir}/.checkpoints/` after each step. If the pipeline is interrupted (crash, Ctrl+C, etc.), re-running the same command resumes from the last completed step -- skipping expensive ML inference.
+
+Checkpoints are automatically invalidated when input file or processing settings change. Use `--no-resume` to force a fresh run.
+
+Pipeline steps with individual checkpoints:
+
+1. **Load imagery** -- raster data + transform + CRS
+2. **Tile** -- all tile arrays + metadata
+3. **Detect** -- raw detections as GeoJSON
+4. **Post-process** (6 substeps, each checkpointed):
+   - NMS, confidence filter, size filter, shape filter, simplify, clip to AOI
+5. **Export** -- GeoJSON, GeoPackage, Shapefile
+6. **Compute indicators** -- CSV + JSON
 
 ## Docker
 

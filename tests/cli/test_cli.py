@@ -4,10 +4,12 @@ import json
 from unittest.mock import MagicMock, patch
 
 import numpy as np
+from rasterio.transform import Affine
 from shapely.geometry import box
 from typer.testing import CliRunner
 
 from cli.main import app
+from core.models.tile import Tile
 from core.services.detector import RawDetection
 from core.services.indicators import ZoneIndicatorResult
 
@@ -32,7 +34,7 @@ def test_process_local_runs_pipeline(tmp_path):
     output_dir = tmp_path / "output"
 
     mock_data = np.zeros((3, 100, 100), dtype=np.float32)
-    mock_transform = MagicMock()
+    mock_transform = Affine(0.0001, 0, 0, 0, -0.0001, 1)
     mock_dataset = MagicMock()
 
     mock_detection = RawDetection(
@@ -48,12 +50,19 @@ def test_process_local_runs_pipeline(tmp_path):
         density_per_km2=10.0,
         total_area_m2=500.0,
     )
+    mock_tile = Tile(
+        index=(0, 0),
+        pixel_window=(0, 0, 100, 100),
+        transform=mock_transform,
+        data=np.zeros((3, 512, 512), dtype=np.float32),
+        valid_mask=np.ones((512, 512), dtype=np.bool_),
+        crs="EPSG:4326",
+    )
 
     with (
         patch("core.services.imagery.ImageryLoaderService") as MockLoader,
         patch("core.services.tiler.TilerService") as MockTiler,
         patch("core.services.detector.DetectorService") as MockDetector,
-        patch("core.services.postprocessor.PostprocessorService") as MockPP,
         patch("core.services.exporter.GISExporterService") as MockExporter,
         patch("core.services.indicators.IndicatorCalculatorService") as MockCalc,
         patch("cli.commands.process.settings") as mock_settings,
@@ -77,15 +86,9 @@ def test_process_local_runs_pipeline(tmp_path):
         }
         loader.clip_to_aoi.return_value = (mock_data, mock_transform, "EPSG:4326")
 
-        mock_tile = MagicMock()
         MockTiler.return_value.generate_tiles.return_value = [mock_tile]
 
         MockDetector.return_value.predict_tile.return_value = [mock_detection]
-
-        MockPP.return_value.run.return_value = (
-            [mock_detection],
-            {"input_count": 1, "output_count": 1},
-        )
 
         MockExporter.return_value.export_all.return_value = {
             "geojson": output_dir / "detections.geojson",
@@ -117,7 +120,6 @@ def test_process_local_runs_pipeline(tmp_path):
 
         loader.load.assert_called_once()
         MockDetector.return_value.load_models.assert_called_once()
-        MockPP.return_value.run.assert_called_once()
         MockExporter.return_value.export_all.assert_called_once()
         MockCalc.return_value.compute.assert_called_once()
 
