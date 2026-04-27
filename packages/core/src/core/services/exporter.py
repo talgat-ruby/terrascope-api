@@ -25,19 +25,20 @@ class GISExporterService:
         """
         if not detections:
             return gpd.GeoDataFrame(
-                columns=["class_name", "confidence", "source", "geometry", "area_m2"],
+                columns=["id", "class_name", "confidence", "source", "geometry", "area_m2", "center"],
                 geometry="geometry",
                 crs=crs,
             )
 
         records = [
             {
+                "id": i,
                 "class_name": d.class_name,
                 "confidence": d.confidence,
                 "source": d.source,
                 "geometry": d.geometry,
             }
-            for d in detections
+            for i, d in enumerate(detections)
         ]
 
         gdf = gpd.GeoDataFrame(records, geometry="geometry", crs=crs)
@@ -45,6 +46,7 @@ class GISExporterService:
         gdf["area_m2"] = gdf.geometry.apply(
             lambda g: abs(geod.geometry_area_perimeter(g)[0])
         )
+        gdf["center"] = gdf.geometry.apply(lambda g: g.centroid.wkt)
         return gdf
 
     def export_geojson(self, gdf: gpd.GeoDataFrame, path: str | Path) -> Path:
