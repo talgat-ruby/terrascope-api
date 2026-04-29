@@ -111,9 +111,7 @@ async def test_download_missing_file(mock_db, tmp_path):
     session, get_db_override = mock_db
 
     missing_path = tmp_path / "nonexistent" / "detections.geojson"
-    job = _make_completed_job(
-        export_formats={"geojson": str(missing_path)}
-    )
+    job = _make_completed_job(export_formats={"geojson": str(missing_path)})
 
     result_mock = MagicMock()
     result_mock.scalar_one_or_none.return_value = job

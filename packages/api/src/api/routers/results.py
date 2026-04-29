@@ -55,12 +55,14 @@ async def get_detections(
             {
                 "type": "Feature",
                 "properties": {
-                    "id": str(d.id),
+                    "id": d.id,
                     "class": d.class_name,
                     "confidence": d.confidence,
-                    "source": d.source,
-                    "area_m2": d.area_m2,
-                    "length_m": d.length_m,
+                    "centroid": (
+                        mapping(to_shape(d.geometry).centroid)  # type: ignore[arg-type]
+                        if d.geometry
+                        else None
+                    ),
                 },
                 "geometry": mapping(to_shape(d.geometry)) if d.geometry else None,  # type: ignore[arg-type]
             }
@@ -77,7 +79,7 @@ async def get_detections(
 @router.get("/{job_id}/download")
 async def download_results(
     job_id: uuid.UUID,
-    format: str = Query("geojson", pattern="^(geojson|gpkg|shp)$"),
+    format: str = Query("geojson", pattern="^(geojson|png)$"),
     db: AsyncSession = Depends(get_db),
 ) -> FileResponse:
     result = await db.execute(select(ProcessingJob).where(ProcessingJob.id == job_id))
@@ -106,8 +108,7 @@ async def download_results(
 
     media_types = {
         "geojson": "application/geo+json",
-        "gpkg": "application/geopackage+sqlite3",
-        "shp": "application/x-shapefile",
+        "png": "image/png",
     }
     return FileResponse(
         path=str(file_path),

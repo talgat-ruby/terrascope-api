@@ -33,9 +33,7 @@ async def upload_imagery(file: UploadFile) -> dict:
             size += len(chunk)
             if size > _MAX_UPLOAD_BYTES:
                 dest.unlink(missing_ok=True)
-                raise HTTPException(
-                    status_code=413, detail="File too large (max 2 GB)"
-                )
+                raise HTTPException(status_code=413, detail="File too large (max 2 GB)")
             f.write(chunk)
 
     return {

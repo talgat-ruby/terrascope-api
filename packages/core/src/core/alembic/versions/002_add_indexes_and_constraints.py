@@ -16,12 +16,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.create_index(
-        "ix_processing_jobs_status", "processing_jobs", ["status"]
-    )
-    op.create_index(
-        "ix_processing_jobs_created_at", "processing_jobs", ["created_at"]
-    )
+    op.create_index("ix_processing_jobs_status", "processing_jobs", ["status"])
+    op.create_index("ix_processing_jobs_created_at", "processing_jobs", ["created_at"])
     op.create_unique_constraint(
         "uq_quality_metrics_job_class",
         "quality_metrics",

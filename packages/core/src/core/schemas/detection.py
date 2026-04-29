@@ -1,5 +1,4 @@
 import uuid
-from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
@@ -9,9 +8,8 @@ from shapely.validation import explain_validity
 
 class DetectionCreate(BaseModel):
     class_name: str
-    confidence: int = Field(ge=0, le=100)
-    source: str
-    geometry: dict[str, Any]
+    confidence: float = Field(ge=0.0, le=1.0)
+    geometry: dict[str, Any]  # bbox polygon, GeoJSON
 
     @field_validator("geometry")
     @classmethod
@@ -23,20 +21,12 @@ class DetectionCreate(BaseModel):
         if not geom.is_valid:
             raise ValueError(f"Invalid geometry: {explain_validity(geom)}")
         return v
-    area_m2: float | None = None
-    length_m: float | None = None
-    date: datetime | None = None
-    change_flag: bool | None = None
 
 
 class DetectionResponse(BaseModel):
-    id: uuid.UUID
+    id: int
     job_id: uuid.UUID
     class_name: str
-    confidence: int
-    source: str
-    geometry: dict  # GeoJSON geometry
-    area_m2: float | None = None
-    length_m: float | None = None
-    date: datetime | None = None
-    change_flag: bool | None = None
+    confidence: float
+    geometry: dict  # bbox polygon
+    centroid: dict | None = None

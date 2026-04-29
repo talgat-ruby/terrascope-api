@@ -49,39 +49,37 @@ class Settings(BaseSettings):
     output_dir: Path = Path("output")
     model_cache_dir: Path = Path("model_cache")
 
-    # Tiling
-    tile_size: int = 512
-    tile_overlap: int = 64
-
     # Detection
-    confidence_threshold: int = 50
-    min_area_m2: float = 25.0
-    max_area_m2: float = 1_000_000.0
-    min_length_m: float = 5.0
-    nms_iou_threshold: float = 0.5
-    simplify_tolerance_m: float = 1.0
-
-    # ML model
-    model_name: str = "torchgeo"
-    device: str = Field(default_factory=lambda: (
-        __import__("torch").cuda.is_available() and "cuda" or 
-        (hasattr(__import__("torch").backends, "mps") and __import__("torch").backends.mps.is_available() and "mps") or 
-        "cpu"
-    ) if __import__("importlib.util").util.find_spec("torch") else "cpu")
+    detector_name: str = "yolov8n-sahi"
+    yolo_weights: str = "yolov8n.pt"
+    min_confidence: float = 0.25
+    landscape_model: str = "nvidia/segformer-b0-finetuned-ade-512-512"
+    landscape_max_dim: int = 1024  # downsample raster long-side cap for the segmenter
+    landscape_min_pixels: int = 200  # drop connected components smaller than this
+    device: str = Field(
+        default_factory=lambda: (
+            (
+                __import__("torch").cuda.is_available()
+                and "cuda"
+                or (
+                    hasattr(__import__("torch").backends, "mps")
+                    and __import__("torch").backends.mps.is_available()
+                    and "mps"
+                )
+                or "cpu"
+            )
+            if __import__("importlib.util").util.find_spec("torch")
+            else "cpu"
+        )
+    )
 
     # STAC
     stac_api_url: str = "https://earth-search.aws.element84.com/v1"
 
     @model_validator(mode="after")
     def _check_consistency(self) -> "Settings":
-        if self.min_area_m2 >= self.max_area_m2:
-            raise ValueError("min_area_m2 must be less than max_area_m2")
-        if not 0 <= self.nms_iou_threshold <= 1:
-            raise ValueError("nms_iou_threshold must be between 0 and 1")
-        if not 0 <= self.confidence_threshold <= 100:
-            raise ValueError("confidence_threshold must be between 0 and 100")
-        if self.tile_overlap >= self.tile_size:
-            raise ValueError("tile_overlap must be less than tile_size")
+        if not 0.0 <= self.min_confidence <= 1.0:
+            raise ValueError("min_confidence must be between 0 and 1")
         return self
 
 

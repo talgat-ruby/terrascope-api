@@ -1,4 +1,4 @@
-"""Export results activity."""
+"""Export activity: write GeoJSON from persisted detections."""
 
 import asyncio
 
@@ -11,7 +11,7 @@ from core.models.detection import Detection
 from core.models.processing import JobStatus
 from core.services.exporter import GISExporterService
 from worker.activities._helpers import (
-    detections_to_raw,
+    detections_to_domain,
     fail_job,
     get_job,
     update_job,
@@ -20,7 +20,8 @@ from worker.activities._helpers import (
 
 @activity.defn
 async def export_results(job_id: str) -> dict:
-    """Export detections to GeoJSON, GeoPackage, and Shapefile."""
+    """Write GeoJSON for the job's detections. PNG was already rendered
+    during the detection activity (where pixel_bbox is still in scope)."""
     async with async_session_factory() as session:
         job = await get_job(session, job_id)
         await update_job(
@@ -28,41 +29,45 @@ async def export_results(job_id: str) -> dict:
         )
 
         try:
-            # Load detections from DB
             result = await session.execute(
                 select(Detection).where(Detection.job_id == job.id)
             )
-            db_detections = list(result.scalars().all())
-            raw_detections = detections_to_raw(db_detections)
+            rows = list(result.scalars().all())
+            detections = detections_to_domain(rows)
 
-            # Get CRS from load checkpoint
             crs = job.checkpoint_data["load"]["crs"]  # type: ignore[index]
-
-            # Export to all formats
-            output_dir = settings.output_dir / job_id / "exports"
-            exporter = GISExporterService()
-            paths = await asyncio.to_thread(
-                exporter.export_all, raw_detections, crs, output_dir
+            overlay_path = job.checkpoint_data.get("detect", {}).get(  # type: ignore[union-attr]
+                "overlay_path"
             )
 
-            format_paths = {k: str(v) for k, v in paths.items()}
+            output_dir = settings.output_dir / job_id
+            output_dir.mkdir(parents=True, exist_ok=True)
+            geojson_path = output_dir / "detections.geojson"
+
+            exporter = GISExporterService()
+            await asyncio.to_thread(
+                exporter.export_geojson, detections, geojson_path, crs
+            )
+
+            formats = {"geojson": str(geojson_path)}
+            if overlay_path:
+                formats["png"] = overlay_path
 
             await update_job(
                 session,
                 job,
                 status=JobStatus.EXPORTING,
                 current_step="export_results",
-                checkpoint_update={"export": {"formats": format_paths}},
+                checkpoint_update={"export": {"formats": formats}},
             )
 
             activity.logger.info(
-                f"Exported {len(raw_detections)} detections for job {job_id}: "
-                f"{list(format_paths.keys())}"
+                f"Exported {len(detections)} detections for job {job_id}"
             )
             return {
                 "status": "exported",
                 "job_id": job_id,
-                "formats": list(format_paths.keys()),
+                "formats": list(formats.keys()),
             }
 
         except Exception as e:

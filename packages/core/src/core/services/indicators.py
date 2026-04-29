@@ -7,9 +7,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from pyproj import Geod
+from shapely.geometry import box
 from shapely.geometry.base import BaseGeometry
 
-from core.services.detector import RawDetection
+from core.detection.types import Detection
 
 
 @dataclass
@@ -24,40 +25,34 @@ class ZoneIndicatorResult:
 
 
 class IndicatorCalculatorService:
-    """Computes per-zone quantitative metrics from detections."""
+    """Computes per-zone, per-class indicators from bbox detections.
+
+    Membership is by centroid (a detection counts toward zone Z if its
+    centroid lies inside Z). Area is the sum of bbox geodesic areas.
+    """
 
     def __init__(self) -> None:
         self._geod = Geod(ellps="WGS84")
 
     def compute(
         self,
-        detections: list[RawDetection],
+        detections: list[Detection],
         zones: Mapping[str, BaseGeometry],
     ) -> list[ZoneIndicatorResult]:
-        """Compute per-zone, per-class indicators via spatial intersection.
-
-        Args:
-            detections: List of RawDetection instances.
-            zones: Dict mapping zone_id to zone geometry.
-
-        Returns:
-            List of ZoneIndicatorResult, one per zone/class combination.
-        """
         results: list[ZoneIndicatorResult] = []
 
         for zone_id, zone_geom in zones.items():
             zone_area_m2 = abs(self._geod.geometry_area_perimeter(zone_geom)[0])
             zone_area_km2 = zone_area_m2 / 1_000_000.0 if zone_area_m2 > 0 else 1.0
 
-            # Group detections that intersect this zone, by class
             class_stats: dict[str, list[float]] = {}
             for det in detections:
-                if not det.geometry.intersects(zone_geom):
+                if not zone_geom.covers(det.centroid) and not zone_geom.intersects(
+                    det.centroid
+                ):
                     continue
-                clipped = det.geometry.intersection(zone_geom)
-                if clipped.is_empty:
-                    continue
-                area_m2 = abs(self._geod.geometry_area_perimeter(clipped)[0])
+                bbox_poly = box(*det.bbox)
+                area_m2 = abs(self._geod.geometry_area_perimeter(bbox_poly)[0])
                 class_stats.setdefault(det.class_name, []).append(area_m2)
 
             for class_name, areas in class_stats.items():
@@ -79,15 +74,6 @@ class IndicatorCalculatorService:
     def export_csv(
         self, indicators: list[ZoneIndicatorResult], path: str | Path
     ) -> Path:
-        """Export indicators to CSV.
-
-        Args:
-            indicators: List of computed indicators.
-            path: Output file path.
-
-        Returns:
-            Path to the written file.
-        """
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -116,15 +102,6 @@ class IndicatorCalculatorService:
     def export_json(
         self, indicators: list[ZoneIndicatorResult], path: str | Path
     ) -> Path:
-        """Export indicators to JSON.
-
-        Args:
-            indicators: List of computed indicators.
-            path: Output file path.
-
-        Returns:
-            Path to the written file.
-        """
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -145,14 +122,6 @@ class IndicatorCalculatorService:
     def generate_summary_table(
         self, indicators: list[ZoneIndicatorResult]
     ) -> list[dict]:
-        """Generate a summary table grouped by zone.
-
-        Args:
-            indicators: List of computed indicators.
-
-        Returns:
-            List of dicts, one per zone, with per-class breakdowns.
-        """
         by_zone: dict[str, dict[str, ZoneIndicatorResult]] = {}
         for ind in indicators:
             by_zone.setdefault(ind.zone_id, {})[ind.class_name] = ind

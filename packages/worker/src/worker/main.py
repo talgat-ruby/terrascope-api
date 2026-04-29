@@ -7,11 +7,10 @@ from temporalio.worker import Worker
 
 from core.config import settings
 from worker.activities._helpers import finalize_job
-from worker.activities.detection import detect_tile, finalize_detection, prepare_detection
+from worker.activities.detection import detect
 from worker.activities.export import export_results
-from worker.activities.imagery import load_imagery, tile_imagery
+from worker.activities.imagery import load_imagery
 from worker.activities.indicators import compute_indicators
-from worker.activities.postprocessing import postprocess
 from worker.workflows.processing import ProcessingWorkflow
 
 logger = logging.getLogger(__name__)
@@ -26,11 +25,7 @@ async def run_worker() -> None:
         workflows=[ProcessingWorkflow],
         activities=[
             load_imagery,
-            tile_imagery,
-            prepare_detection,
-            detect_tile,
-            finalize_detection,
-            postprocess,
+            detect,
             export_results,
             compute_indicators,
             finalize_job,

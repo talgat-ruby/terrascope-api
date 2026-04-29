@@ -8,7 +8,9 @@ class ZoneIndicator(SQLModel, table=True):
     __tablename__ = "zone_indicators"  # type: ignore[assignment]
     __table_args__ = (
         UniqueConstraint(
-            "job_id", "zone_id", "class_name",
+            "job_id",
+            "zone_id",
+            "class_name",
             name="uq_zone_indicators_job_zone_class",
         ),
     )

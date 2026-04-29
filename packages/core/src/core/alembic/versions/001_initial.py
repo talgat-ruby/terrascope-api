@@ -4,6 +4,7 @@ Revision ID: 001
 Revises:
 Create Date: 2026-04-15
 """
+
 from typing import Sequence, Union
 
 import geoalchemy2
@@ -25,7 +26,11 @@ def upgrade() -> None:
         sa.Column("id", sa.Uuid(), primary_key=True),
         sa.Column("name", sa.String(), nullable=False),
         sa.Column("crs", sa.String(), nullable=False),
-        sa.Column("geometry", geoalchemy2.Geometry(geometry_type="POLYGON", srid=4326), nullable=True),
+        sa.Column(
+            "geometry",
+            geoalchemy2.Geometry(geometry_type="POLYGON", srid=4326),
+            nullable=True,
+        ),
     )
 
     op.create_table(
@@ -46,11 +51,17 @@ def upgrade() -> None:
     op.create_table(
         "detections",
         sa.Column("id", sa.Uuid(), primary_key=True),
-        sa.Column("job_id", sa.Uuid(), sa.ForeignKey("processing_jobs.id"), nullable=False),
+        sa.Column(
+            "job_id", sa.Uuid(), sa.ForeignKey("processing_jobs.id"), nullable=False
+        ),
         sa.Column("class_name", sa.String(), nullable=False),
         sa.Column("confidence", sa.Integer(), nullable=False),
         sa.Column("source", sa.String(), nullable=False),
-        sa.Column("geometry", geoalchemy2.Geometry(geometry_type="GEOMETRY", srid=4326), nullable=True),
+        sa.Column(
+            "geometry",
+            geoalchemy2.Geometry(geometry_type="GEOMETRY", srid=4326),
+            nullable=True,
+        ),
         sa.Column("area_m2", sa.Float(), nullable=True),
         sa.Column("length_m", sa.Float(), nullable=True),
         sa.Column("date", sa.DateTime(), nullable=True),
@@ -62,8 +73,12 @@ def upgrade() -> None:
     op.create_table(
         "zone_indicators",
         sa.Column("id", sa.Uuid(), primary_key=True),
-        sa.Column("job_id", sa.Uuid(), sa.ForeignKey("processing_jobs.id"), nullable=False),
-        sa.Column("zone_id", sa.Uuid(), sa.ForeignKey("territories.id"), nullable=False),
+        sa.Column(
+            "job_id", sa.Uuid(), sa.ForeignKey("processing_jobs.id"), nullable=False
+        ),
+        sa.Column(
+            "zone_id", sa.Uuid(), sa.ForeignKey("territories.id"), nullable=False
+        ),
         sa.Column("class_name", sa.String(), nullable=False),
         sa.Column("count", sa.Integer(), nullable=False),
         sa.Column("density_per_km2", sa.Float(), nullable=False),
@@ -75,7 +90,9 @@ def upgrade() -> None:
     op.create_table(
         "quality_metrics",
         sa.Column("id", sa.Uuid(), primary_key=True),
-        sa.Column("job_id", sa.Uuid(), sa.ForeignKey("processing_jobs.id"), nullable=False),
+        sa.Column(
+            "job_id", sa.Uuid(), sa.ForeignKey("processing_jobs.id"), nullable=False
+        ),
         sa.Column("class_name", sa.String(), nullable=False),
         sa.Column("precision", sa.Float(), nullable=False),
         sa.Column("recall", sa.Float(), nullable=False),

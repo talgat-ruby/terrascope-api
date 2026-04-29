@@ -1,24 +1,12 @@
 import uuid
 
 from core.models import (
-    CLASS_REGISTRY,
     JobStatus,
     ProcessingJob,
     QualityMetrics,
     Territory,
     ZoneIndicator,
 )
-
-
-def test_class_registry_has_expected_classes():
-    assert "building" in CLASS_REGISTRY
-    assert "road" in CLASS_REGISTRY
-    assert "vegetation" in CLASS_REGISTRY
-    assert "water" in CLASS_REGISTRY
-    for cls_info in CLASS_REGISTRY.values():
-        assert "description" in cls_info
-        assert "geometry_type" in cls_info
-        assert "justification" in cls_info
 
 
 def test_job_status_enum():

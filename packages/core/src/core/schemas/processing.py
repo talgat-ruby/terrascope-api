@@ -15,9 +15,7 @@ def _validate_polygon(v: dict[str, Any]) -> dict[str, Any]:
     except Exception as exc:
         raise ValueError(f"Invalid GeoJSON geometry: {exc}") from exc
     if geom.geom_type not in ("Polygon", "MultiPolygon"):
-        raise ValueError(
-            f"Expected Polygon or MultiPolygon, got {geom.geom_type}"
-        )
+        raise ValueError(f"Expected Polygon or MultiPolygon, got {geom.geom_type}")
     if not geom.is_valid:
         raise ValueError(f"Invalid geometry: {explain_validity(geom)}")
     return v

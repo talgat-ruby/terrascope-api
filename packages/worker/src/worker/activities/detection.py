@@ -1,157 +1,95 @@
-"""Object detection activities — per-tile parallelism via Temporal."""
+"""Detection activity: load raster, run detector, filter, persist."""
 
 import asyncio
-import json
 import uuid
-from dataclasses import dataclass
-from pathlib import Path
 
 import numpy as np
-from pyproj import Geod
 from rasterio.transform import Affine
-from sqlalchemy import delete, func, select
+from shapely import wkt as shapely_wkt
+from sqlalchemy import delete
 from temporalio import activity
 
 from core.config import settings
 from core.database import async_session_factory
+from core.detection import build_detector, filter_detections, render_overlay
+from core.detection.types import Raster
 from core.models.detection import Detection
 from core.models.processing import JobStatus
-from core.models.tile import Tile
-from core.services.detector import DetectorService
-from worker.activities._helpers import fail_job, get_job, raw_to_detections, update_job
-
-
-@dataclass
-class TileDetectionInput:
-    """Serializable input for a single tile detection activity."""
-
-    job_id: str
-    tile_name: str
-    tiles_dir: str
-    transform: list[float]
-    index: list[int]
-    pixel_window: list[int]
-    crs: str
+from worker.activities._helpers import (
+    domain_to_rows,
+    fail_job,
+    get_job,
+    update_job,
+)
 
 
 @activity.defn
-async def prepare_detection(job_id: str) -> dict:
-    """Read tile manifest, clean old detections, return tile metadata for fan-out."""
+async def detect(job_id: str) -> dict:
+    """Run the configured Detector against the loaded raster, persist results."""
     async with async_session_factory() as session:
         job = await get_job(session, job_id)
-
-        # Idempotency guard
-        if job.checkpoint_data and "detect" in job.checkpoint_data:
-            cached = job.checkpoint_data["detect"]
-            return {
-                "skipped": True,
-                "job_id": job_id,
-                "detection_count": cached["raw_detection_count"],
-            }
-
         await update_job(
-            session, job, status=JobStatus.DETECTING, current_step="prepare_detection"
+            session, job, status=JobStatus.DETECTING, current_step="detect"
         )
 
         try:
-            tile_checkpoint = job.checkpoint_data["tile"]  # type: ignore[index]
-            manifest_path = tile_checkpoint["manifest_path"]
-            tiles_dir = tile_checkpoint["tiles_dir"]
+            load_checkpoint = job.checkpoint_data["load"]  # type: ignore[index]
+            data = await asyncio.to_thread(np.load, load_checkpoint["clipped_path"])
+            transform = Affine(*load_checkpoint["transform"])
+            crs = load_checkpoint["crs"]
+            aoi_wkt = load_checkpoint.get("aoi_wkt")
+            aoi_geom = shapely_wkt.loads(aoi_wkt) if aoi_wkt else None
 
-            manifest = json.loads(Path(manifest_path).read_text())
+            raster = Raster(data=data, transform=transform, crs=crs, aoi_geom=aoi_geom)
 
-            # Delete prior detections for idempotency on retry
-            await session.execute(
-                delete(Detection).where(Detection.job_id == job.id)  # type: ignore[arg-type]
+            detector_name = (job.config or {}).get("detector_name")
+            detector = await asyncio.to_thread(build_detector, detector_name)
+
+            min_confidence = (job.config or {}).get("min_confidence", 0.25)
+
+            detections = await asyncio.to_thread(detector.detect, raster)
+            detections = filter_detections(
+                detections, min_confidence=min_confidence, aoi=aoi_geom
             )
-            await session.commit()
 
+            # Persist with the sequential ids assigned by filter_detections.
+            await session.execute(
+                delete(Detection).where(Detection.job_id == uuid.UUID(job_id))  # type: ignore[arg-type]
+            )
+            rows = domain_to_rows(detections, job_id)
+            session.add_all(rows)
+
+            # Render PNG overlay while pixel_bbox is still in scope (it's
+            # not persisted to the DB). The export activity that follows
+            # only needs geographic bboxes from the DB rows.
+            job_dir = settings.output_dir / job_id
+            job_dir.mkdir(parents=True, exist_ok=True)
+            overlay_path = job_dir / "overlay.png"
+            await asyncio.to_thread(render_overlay, raster, detections, overlay_path)
+
+            await update_job(
+                session,
+                job,
+                status=JobStatus.DETECTING,
+                current_step="detect",
+                checkpoint_update={
+                    "detect": {
+                        "detector": detector.name,
+                        "detection_count": len(detections),
+                        "overlay_path": str(overlay_path),
+                    }
+                },
+            )
+
+            activity.logger.info(
+                f"Detection done for job {job_id}: {len(detections)} via {detector.name}"
+            )
             return {
-                "skipped": False,
+                "status": "detected",
                 "job_id": job_id,
-                "tiles_dir": tiles_dir,
-                "tiles": manifest,
+                "detection_count": len(detections),
             }
 
         except Exception as e:
             await fail_job(session, job, str(e))
             raise
-
-
-@activity.defn
-async def detect_tile(input: TileDetectionInput) -> dict:
-    """Run ML inference on a single tile and persist detections to DB."""
-    tiles_dir = Path(input.tiles_dir)
-
-    data = await asyncio.to_thread(
-        np.load, str(tiles_dir / f"{input.tile_name}_data.npy")
-    )
-    valid_mask = await asyncio.to_thread(
-        np.load, str(tiles_dir / f"{input.tile_name}_mask.npy")
-    )
-
-    tile = Tile(
-        index=(input.index[0], input.index[1]),
-        pixel_window=(input.pixel_window[0], input.pixel_window[1], input.pixel_window[2], input.pixel_window[3]),
-        transform=Affine(*input.transform),
-        data=data,
-        valid_mask=valid_mask,
-        crs=input.crs,
-    )
-
-    detector = DetectorService(device=settings.device)
-    await asyncio.to_thread(detector.load_models)
-
-    raw_detections = await asyncio.to_thread(detector.predict_tile, tile)
-
-    geod = Geod(ellps="WGS84")
-    db_detections = raw_to_detections(raw_detections, input.job_id, geod)
-
-    async with async_session_factory() as session:
-        session.add_all(db_detections)
-        await session.commit()
-
-    activity.logger.info(
-        f"Tile {input.tile_name}: {len(db_detections)} detections"
-    )
-    return {"tile_name": input.tile_name, "detection_count": len(db_detections)}
-
-
-@activity.defn
-async def finalize_detection(job_id: str) -> dict:
-    """Count persisted detections and update job checkpoint."""
-    async with async_session_factory() as session:
-        job = await get_job(session, job_id)
-
-        # Idempotency guard
-        if job.checkpoint_data and "detect" in job.checkpoint_data:
-            cached = job.checkpoint_data["detect"]
-            return {
-                "status": "detected",
-                "job_id": job_id,
-                "detection_count": cached["raw_detection_count"],
-            }
-
-        result = await session.execute(
-            select(func.count()).where(Detection.job_id == uuid.UUID(job_id))  # type: ignore[arg-type]
-        )
-        total_detections = result.scalar() or 0
-
-        await update_job(
-            session,
-            job,
-            status=JobStatus.DETECTING,
-            current_step="detect_objects",
-            checkpoint_update={
-                "detect": {"raw_detection_count": total_detections}
-            },
-        )
-
-        activity.logger.info(
-            f"Detection finalized for job {job_id}: {total_detections} total detections"
-        )
-        return {
-            "status": "detected",
-            "job_id": job_id,
-            "detection_count": total_detections,
-        }

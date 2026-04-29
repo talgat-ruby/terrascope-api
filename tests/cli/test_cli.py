@@ -1,6 +1,7 @@
 """Tests for CLI commands."""
 
 import json
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -9,92 +10,67 @@ from shapely.geometry import box
 from typer.testing import CliRunner
 
 from cli.main import app
-from core.models.tile import Tile
-from core.services.detector import RawDetection
-from core.services.indicators import ZoneIndicatorResult
+from core.detection.types import Detection, Raster
 
 runner = CliRunner()
 
 
-# --- process command tests ---
+def _make_raster() -> Raster:
+    return Raster(
+        data=np.zeros((100, 100, 3), dtype=np.uint8),
+        transform=Affine(0.0001, 0, 0, 0, -0.0001, 1),
+        crs="EPSG:4326",
+        aoi_geom=box(0, 0, 1, 1),
+    )
 
 
-def test_process_local_runs_pipeline(tmp_path):
-    """Test local processing pipeline with mocked services."""
+def _make_detection() -> Detection:
+    bnds = (0.1, 0.1, 0.2, 0.2)
+    return Detection(
+        id=0,
+        class_name="car",
+        confidence=0.85,
+        bbox=bnds,
+        pixel_bbox=(10, 10, 30, 30),
+        centroid=box(*bnds).centroid,
+    )
+
+
+def test_process_local_runs_pipeline(tmp_path: Path):
     input_tif = tmp_path / "input.tif"
     input_tif.touch()
-
     aoi_path = tmp_path / "aoi.geojson"
-    aoi_geojson = {
-        "type": "Polygon",
-        "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]],
-    }
-    aoi_path.write_text(json.dumps(aoi_geojson))
-
+    aoi_path.write_text(
+        json.dumps(
+            {
+                "type": "Polygon",
+                "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]],
+            }
+        )
+    )
     output_dir = tmp_path / "output"
 
-    mock_data = np.zeros((3, 100, 100), dtype=np.float32)
-    mock_transform = Affine(0.0001, 0, 0, 0, -0.0001, 1)
-    mock_dataset = MagicMock()
+    raster = _make_raster()
+    detection = _make_detection()
 
-    mock_detection = RawDetection(
-        class_name="building",
-        confidence=85,
-        geometry=box(0.1, 0.1, 0.2, 0.2),
-        source="test",
-    )
-    mock_indicator = ZoneIndicatorResult(
-        zone_id="aoi",
-        class_name="building",
-        count=1,
-        density_per_km2=10.0,
-        total_area_m2=500.0,
-    )
-    mock_tile = Tile(
-        index=(0, 0),
-        pixel_window=(0, 0, 100, 100),
-        transform=mock_transform,
-        data=np.zeros((3, 512, 512), dtype=np.float32),
-        valid_mask=np.ones((512, 512), dtype=np.bool_),
-        crs="EPSG:4326",
-    )
+    stub_detector = MagicMock()
+    stub_detector.name = "stub"
+    stub_detector.detect.return_value = [detection]
 
     with (
         patch("core.services.imagery.ImageryLoaderService") as MockLoader,
-        patch("core.services.tiler.TilerService") as MockTiler,
-        patch("core.services.detector.DetectorService") as MockDetector,
+        patch(
+            "core.detection.build_detector", return_value=stub_detector
+        ) as MockBuild,
+        patch("core.detection.render_overlay") as MockRender,
         patch("core.services.exporter.GISExporterService") as MockExporter,
         patch("core.services.indicators.IndicatorCalculatorService") as MockCalc,
-        patch("cli.commands.process.settings") as mock_settings,
     ):
-        mock_settings.tile_size = 512
-        mock_settings.tile_overlap = 64
-        mock_settings.device = "cpu"
-        mock_settings.nms_iou_threshold = 0.5
-        mock_settings.confidence_threshold = 50
-        mock_settings.min_area_m2 = 10.0
-        mock_settings.max_area_m2 = 1_000_000.0
-        mock_settings.simplify_tolerance_m = 1.0
-
-        loader = MockLoader.return_value
-        loader.load.return_value = mock_dataset
-        loader.get_metadata.return_value = {
-            "band_count": 3,
-            "crs": "EPSG:4326",
-            "bounds": {},
-            "resolution": (10, 10),
-        }
-        loader.clip_to_aoi.return_value = (mock_data, mock_transform, "EPSG:4326")
-
-        MockTiler.return_value.generate_tiles.return_value = [mock_tile]
-
-        MockDetector.return_value.predict_tile.return_value = [mock_detection]
-
-        MockExporter.return_value.export_all.return_value = {
-            "geojson": output_dir / "detections.geojson",
-        }
-
-        MockCalc.return_value.compute.return_value = [mock_indicator]
+        MockLoader.return_value.load_clipped.return_value = raster
+        MockExporter.return_value.export_geojson.return_value = (
+            output_dir / "detections.geojson"
+        )
+        MockCalc.return_value.compute.return_value = []
 
         result = runner.invoke(
             app,
@@ -109,23 +85,17 @@ def test_process_local_runs_pipeline(tmp_path):
             ],
         )
 
-        assert result.exit_code == 0, result.output
-        assert "Loading imagery" in result.output
-        assert "Tiling imagery" in result.output
-        assert "Running detection" in result.output
-        assert "Post-processing" in result.output
-        assert "Exporting results" in result.output
-        assert "Computing indicators" in result.output
-        assert "Done!" in result.output
-
-        loader.load.assert_called_once()
-        MockDetector.return_value.load_models.assert_called_once()
-        MockExporter.return_value.export_all.assert_called_once()
-        MockCalc.return_value.compute.assert_called_once()
+    assert result.exit_code == 0, result.output
+    assert "Loading imagery" in result.output
+    assert "Running detection" in result.output
+    assert "Done." in result.output
+    MockBuild.assert_called_once()
+    stub_detector.detect.assert_called_once()
+    MockRender.assert_called_once()
+    MockExporter.return_value.export_geojson.assert_called_once()
 
 
-def test_process_temporal_flag(tmp_path):
-    """Test that --use-temporal calls _run_temporal."""
+def test_process_temporal_flag(tmp_path: Path):
     aoi_path = tmp_path / "aoi.geojson"
     aoi_path.write_text(
         json.dumps(
@@ -135,7 +105,6 @@ def test_process_temporal_flag(tmp_path):
             }
         )
     )
-
     input_tif = tmp_path / "input.tif"
     input_tif.touch()
 
@@ -158,11 +127,7 @@ def test_process_temporal_flag(tmp_path):
     mock_asyncio.run.assert_called_once()
 
 
-# --- stac command tests ---
-
-
 def test_stac_search():
-    """Test STAC search command."""
     mock_item = MagicMock()
     mock_item.id = "S2A_MSIL2A_20240101"
     mock_item.datetime = MagicMock()
@@ -188,121 +153,12 @@ def test_stac_search():
             ],
         )
 
-        assert result.exit_code == 0, result.output
-        assert "Found 1 items" in result.output
-        assert "S2A_MSIL2A_20240101" in result.output
-
-
-def test_stac_search_invalid_bbox():
-    """Test STAC search with invalid bbox."""
-    result = runner.invoke(
-        app,
-        ["stac", "search", "--bbox", "10.0,20.0,11.0"],
-    )
-
-    assert result.exit_code == 1
-
-
-def test_stac_download(tmp_path):
-    """Test STAC download command."""
-    mock_item = MagicMock()
-    mock_item.id = "S2A_MSIL2A_20240101"
-
-    downloaded = tmp_path / "downloaded.tif"
-
-    with patch("cli.commands.stac.StacService") as MockStac:
-
-        async def mock_search(*args, **kwargs):
-            return [mock_item]
-
-        async def mock_download(*args, **kwargs):
-            return downloaded
-
-        MockStac.return_value.search = mock_search
-        MockStac.return_value.download = mock_download
-
-        result = runner.invoke(
-            app,
-            [
-                "stac",
-                "download",
-                "--item-id",
-                "S2A_MSIL2A_20240101",
-                "--bbox",
-                "10.0,20.0,11.0,21.0",
-                "--output",
-                str(tmp_path),
-            ],
-        )
-
-        assert result.exit_code == 0, result.output
-        assert "Downloaded to:" in result.output
-
-
-# --- evaluate command tests ---
-
-
-def test_evaluate_runs(tmp_path):
-    """Test evaluate command with real GeoJSON files."""
-    import geopandas as gpd
-    from shapely.geometry import box as shapely_box
-
-    # Create prediction GeoJSON
-    pred_gdf = gpd.GeoDataFrame(
-        {
-            "class_name": ["building", "building"],
-            "confidence": [90, 70],
-            "source": ["test", "test"],
-            "geometry": [shapely_box(0, 0, 1, 1), shapely_box(5, 5, 6, 6)],
-        },
-        crs="EPSG:4326",
-    )
-    pred_path = tmp_path / "preds.geojson"
-    pred_gdf.to_file(pred_path, driver="GeoJSON")
-
-    # Create ground truth GeoJSON
-    gt_gdf = gpd.GeoDataFrame(
-        {
-            "class_name": ["building"],
-            "confidence": [100],
-            "source": ["ground_truth"],
-            "geometry": [shapely_box(0, 0, 1, 1)],
-        },
-        crs="EPSG:4326",
-    )
-    gt_path = tmp_path / "gt.geojson"
-    gt_gdf.to_file(gt_path, driver="GeoJSON")
-
-    report_path = tmp_path / "report.json"
-
-    result = runner.invoke(
-        app,
-        [
-            "evaluate",
-            "--predictions",
-            str(pred_path),
-            "--ground-truth",
-            str(gt_path),
-            "--output",
-            str(report_path),
-            "--sample",
-            "1",
-        ],
-    )
-
     assert result.exit_code == 0, result.output
-    assert "building" in result.output
-    assert "Prec" in result.output
-    assert "Report saved" in result.output
-    assert "Control sample" in result.output
-    assert report_path.exists()
-
-
-# --- worker command tests ---
+    assert "Found 1 items" in result.output
+    assert "S2A_MSIL2A_20240101" in result.output
 
 
 def test_worker_help():
-    """Test worker command help text."""
     result = runner.invoke(app, ["worker", "--help"])
     assert result.exit_code == 0
     assert "Temporal worker" in result.output

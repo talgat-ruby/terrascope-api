@@ -16,7 +16,7 @@ from core.models.processing import JobStatus
 from core.models.territory import Territory
 from core.services.indicators import IndicatorCalculatorService
 from worker.activities._helpers import (
-    detections_to_raw,
+    detections_to_domain,
     fail_job,
     get_job,
     update_job,
@@ -51,7 +51,7 @@ async def compute_indicators(job_id: str) -> dict:
                 select(Detection).where(Detection.job_id == job.id)
             )
             db_detections = list(result.scalars().all())
-            raw_detections = detections_to_raw(db_detections)
+            domain_detections = detections_to_domain(db_detections)
 
             # Load territory zones
             if job.aoi_id is not None:
@@ -69,7 +69,7 @@ async def compute_indicators(job_id: str) -> dict:
             # Compute indicators
             calculator = IndicatorCalculatorService()
             indicators = await asyncio.to_thread(
-                calculator.compute, raw_detections, zones
+                calculator.compute, domain_detections, zones
             )
 
             # Persist to DB
