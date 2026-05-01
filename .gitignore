@@ -29,3 +29,7 @@ uploads/
 
 # tmp
 tmp/
+
+# data
+outputs/
+inputs/
