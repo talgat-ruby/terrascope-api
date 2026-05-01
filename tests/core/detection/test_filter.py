@@ -17,6 +17,7 @@ def _det(
         bbox=bounds,
         pixel_bbox=(0, 0, 10, 10),
         centroid=box(*bounds).centroid,
+        source_model="stub",
     )
 
 

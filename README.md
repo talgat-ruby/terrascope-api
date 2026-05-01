@@ -6,18 +6,20 @@ annotated PNG plus a GeoJSON of the detections.
 Given a GeoTIFF, Terrascope:
 
 1. Loads the raster and (optionally) clips to an AOI.
-2. Runs a pluggable `Detector` (default: pretrained Ultralytics YOLO with
-   SAHI sliced inference, so large rasters and edge-spanning objects work
-   without manual tiling).
+2. Runs one or more pluggable `Detector`s declared in the job config. Each
+   detector can be scoped to a specific class allowlist with its own
+   confidence threshold; results are merged with a `source_model` provenance
+   tag. Defaults to YOLO + SAHI sliced inference so large rasters and
+   edge-spanning objects work without manual tiling.
 3. Renders an `overlay.png` with each detection drawn as a labeled bbox on
    the source image.
 4. Writes a `detections.geojson` (point centroid + bbox WKT per feature) for
    GIS use.
 5. Optionally computes per-zone indicators (count, density, bbox area).
 
-Precision is explicitly **not** a goal — the design lets you swap in a
-better-suited model when accuracy matters. The default pipeline ships
-something runnable on day zero with zero training.
+Precision is explicitly **not** a goal — the design lets you compose
+specialist models per class (e.g., one for vehicles, one for buildings)
+without rewriting the pipeline.
 
 ## Tech stack
 
@@ -38,11 +40,14 @@ packages/
   core/
     src/core/
       detection/   Pluggable detector module:
-                     types.py        Detection / Raster / Detector protocol
-                     yolo_sahi.py    Default detector (YOLO + SAHI)
-                     filter.py       Confidence + AOI + id renumber
-                     renderer.py     Pillow PNG overlay
-                     factory.py      Registry-based build_detector()
+                     types.py             Detection / Raster / Detector protocol
+                     spec.py              DetectorSpec — per-detector job config
+                     yolo_sahi.py         YOLO + SAHI detector
+                     segformer_landscape.py  SegFormer-ADE20K land-cover
+                     composite.py         Multi-detector merger w/ class allowlist
+                     filter.py            Confidence + AOI + id renumber
+                     renderer.py          Pillow PNG overlay
+                     factory.py           Registry + build_from_specs()
       services/    Imagery loader, GeoJSON exporter, indicator calculator,
                    STAC client
       models/      SQLModel tables (Detection, ProcessingJob, Territory, ...)
@@ -88,7 +93,9 @@ uv run alembic -c packages/core/src/core/alembic.ini upgrade head
 ```bash
 uv run terrascope process \
   --input inputs/Astana_1.tif \
-  --output outputs/astana
+  --output outputs/astana \
+  --detectors '[{"name":"yolov8-obb-aerial","classes":["ship","large vehicle"]},
+                {"name":"segformer-landscape","classes":["building","road"],"min_confidence":0.5}]'
 ```
 
 Produces:
@@ -98,12 +105,18 @@ Produces:
 - `outputs/astana/indicators/` — CSV + JSON per-zone stats (when an AOI is
   supplied or implied)
 
-Optional flags:
+Flags:
 
+- `--detectors '<json>'` (required) — JSON list of detector specs. Each spec
+  has `name` (factory key), optional `classes` (allowlist), optional
+  `min_confidence`, optional `kwargs`.
 - `--aoi path/to/aoi.geojson` — clip to a polygon AOI
-- `--detector <name>` — pick a registered detector (default `yolov8n-sahi`)
 - `--use-temporal` — submit the job to a running Temporal worker instead of
   running locally
+
+Registered detector names: `yolov8n-sahi`, `yolov8-obb-aerial`,
+`yolov8-obb-dota-v2`, `yolov8-satellite-vehicle`, `segformer-landscape`,
+`beit-ade`.
 
 Other CLI subcommands:
 
@@ -132,7 +145,15 @@ Submit a job:
 ```bash
 curl -X POST http://localhost:30001/processing/start \
   -H "Content-Type: application/json" \
-  -d '{"input_path": "/abs/path/to/raster.tif"}'
+  -d '{
+        "input_path": "/abs/path/to/raster.tif",
+        "config": {
+          "detectors": [
+            {"name": "yolov8-obb-aerial", "classes": ["ship", "large vehicle"]},
+            {"name": "segformer-landscape", "classes": ["building", "road"]}
+          ]
+        }
+      }'
 ```
 
 Poll, then download:
@@ -155,49 +176,62 @@ class Detector(Protocol):
     def detect(self, raster: Raster) -> list[Detection]: ...
 ```
 
-The default implementation, `YoloSahiDetector`:
-
-- Loads an Ultralytics YOLO checkpoint (default `yolov8n.pt`, configurable
-  via `settings.yolo_weights`).
-- For rasters ≤ 1024 px on the long side, runs a single forward pass.
-- For larger rasters, uses SAHI's `get_sliced_prediction` (slice 640,
-  overlap 0.2). SAHI handles tiling, per-slice inference, and merging
-  across slice boundaries via Greedy-NMM.
-- Maps each prediction to a `Detection`: pixel bbox, geographic bbox via the
-  raster's affine, COCO class name, score in [0, 1].
-
-Switching detectors:
+A job declares which detectors to run via a list of `DetectorSpec`s:
 
 ```python
-# packages/core/src/core/detection/factory.py
-_BUILDERS = {
-    "yolov8n-sahi": _build_yolo_sahi,
-    # add your detector here, e.g.:
-    # "rtdetr": _build_rtdetr,
-    # "grounding-dino": _build_grounding_dino,
-}
+@dataclass(frozen=True)
+class DetectorSpec:
+    name: str                              # factory key
+    classes: tuple[str, ...] | None = None # allowlist; None = accept all
+    min_confidence: float | None = None    # per-detector override
+    kwargs: dict[str, Any] = field(default_factory=dict)
 ```
 
-Adding a new detector is one entry in `_BUILDERS` plus a class that
-implements the `Detector` protocol. No changes to the orchestrator, worker,
-exporter, or DB schema.
+`build_from_specs(specs)` returns a single leaf detector when one spec is
+provided, or wraps multiple specs in a `CompositeDetector` that:
 
-Postprocessing is one function — `filter_detections(...)`: confidence
-threshold, optional AOI centroid containment, sequential id renumbering. NMS
-/ stitching / size filters are intentionally absent: SAHI does the merging
-during inference.
+1. Runs each child against the same raster.
+2. Drops detections whose `class_name` isn't in the spec's allowlist.
+3. Drops detections below the spec's `min_confidence`.
+4. Stamps each detection with `source_model = child.name`.
+5. Concatenates all surviving detections and renumbers ids 0..N.
+
+Built-in detectors:
+
+| Name                       | Backend                              | Classes                                                       |
+|----------------------------|--------------------------------------|---------------------------------------------------------------|
+| `yolov8n-sahi`             | Ultralytics YOLO + SAHI              | COCO 80 (generic objects)                                     |
+| `yolov8-obb-aerial`        | YOLOv8s-OBB (DOTA v1)                | 15 aerial classes (ship, plane, vehicle, harbor, bridge, ...) |
+| `yolov8-obb-dota-v2`       | YOLOv8x-OBB (DOTA v2)                | DOTA v2 incl. sports fields (tennis, basketball, soccer)      |
+| `yolov8-satellite-vehicle` | `keremberke/yolov8m-satellite-...`   | car (HF-hosted finetune for satellite imagery)                |
+| `segformer-landscape`      | SegFormer-ADE20K                     | building, road, grass, tree, water, earth, sand, mountain     |
+| `beit-ade`                 | `microsoft/beit-large-finetuned-ade` | Same ADE20K classes; higher-capacity backbone                 |
+
+Adding a new detector is one entry in `_BUILDERS` plus a class implementing
+the `Detector` protocol. The orchestrator, worker, exporter, and DB schema
+do not change.
+
+Postprocessing is one function — `filter_detections(...)`: global
+confidence floor, optional AOI centroid containment, sequential id
+renumbering. NMS / stitching / size filters are absent: SAHI does the
+merging during inference, per-detector confidence is handled in the spec.
 
 ## Configuration
 
 Settings live in `core/config.py` (pydantic-settings). Common knobs:
 
-| Setting          | Default        | Purpose                       |
-|------------------|----------------|-------------------------------|
-| `detector_name`  | `yolov8n-sahi` | Which `Detector` to build     |
-| `yolo_weights`   | `yolov8n.pt`   | Ultralytics checkpoint path   |
-| `min_confidence` | `0.25`         | Postprocess threshold (0–1)   |
-| `device`         | autodetect     | `cuda` / `mps` / `cpu`        |
-| `output_dir`     | `output`       | Where job artifacts land      |
+| Setting               | Default        | Purpose                                         |
+|-----------------------|----------------|-------------------------------------------------|
+| `yolo_weights`        | `yolov8n.pt`   | Default Ultralytics checkpoint                  |
+| `landscape_model`     | SegFormer-b0   | HF model id for SegformerLandscapeDetector      |
+| `landscape_max_dim`   | `1024`         | Downsample raster long-side cap for segmenter   |
+| `landscape_min_pixels`| `200`          | Drop CC regions smaller than this               |
+| `min_confidence`      | `0.25`         | Global postprocess threshold (0–1)              |
+| `device`              | autodetect     | `cuda` / `mps` / `cpu`                          |
+| `output_dir`          | `output`       | Where job artifacts land                        |
+
+Detectors are selected per-job via the `detectors` field in
+`ProcessingJob.config` (or `--detectors` on the CLI), not via a setting.
 
 Override via `.env` or environment variables.
 
@@ -206,12 +240,13 @@ Override via `.env` or environment variables.
 `detections.geojson` is a `FeatureCollection` of `Point` features
 (centroids). Each feature carries:
 
-| Field        | Type    | Meaning                                              |
-|--------------|---------|------------------------------------------------------|
-| `id`         | int     | 0..N, assigned post-filter                           |
-| `class_name` | string  | Whatever label the detector emitted (e.g., `"car"`)  |
-| `confidence` | float   | Score in [0, 1]                                      |
-| `bbox_wkt`   | string  | WKT of the bbox polygon in EPSG:4326                 |
+| Field          | Type    | Meaning                                              |
+|----------------|---------|------------------------------------------------------|
+| `id`           | int     | 0..N, assigned post-filter                           |
+| `class_name`   | string  | Whatever label the detector emitted (e.g., `"car"`)  |
+| `confidence`   | float   | Score in [0, 1]                                      |
+| `source_model` | string  | Detector name that produced this detection           |
+| `bbox_wkt`     | string  | WKT of the bbox polygon in EPSG:4326                 |
 
 The `detections` table mirrors this: composite PK `(job_id, id)`, geometry
 columns for centroid (`POINT`) and `bbox` (`POLYGON`), all SRID 4326.

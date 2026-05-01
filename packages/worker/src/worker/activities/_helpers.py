@@ -83,6 +83,7 @@ def detections_to_domain(rows: list[Detection]) -> list[DomainDetection]:
                 bbox=(minx, miny, maxx, maxy),
                 pixel_bbox=(0, 0, 0, 0),
                 centroid=centroid,
+                source_model=d.source_model,
             )
         )
     return out
@@ -100,6 +101,7 @@ def domain_to_rows(detections: list[DomainDetection], job_id: str) -> list[Detec
                 job_id=job_uuid,
                 class_name=d.class_name,
                 confidence=d.confidence,
+                source_model=d.source_model,
                 geometry=from_shape(bbox_poly, srid=4326),  # type: ignore[arg-type]
             )
         )

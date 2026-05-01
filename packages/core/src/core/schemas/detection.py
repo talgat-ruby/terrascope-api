@@ -9,6 +9,7 @@ from shapely.validation import explain_validity
 class DetectionCreate(BaseModel):
     class_name: str
     confidence: float = Field(ge=0.0, le=1.0)
+    source_model: str
     geometry: dict[str, Any]  # bbox polygon, GeoJSON
 
     @field_validator("geometry")
@@ -28,5 +29,6 @@ class DetectionResponse(BaseModel):
     job_id: uuid.UUID
     class_name: str
     confidence: float
+    source_model: str
     geometry: dict  # bbox polygon
     centroid: dict | None = None

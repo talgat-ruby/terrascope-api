@@ -19,10 +19,15 @@ def run(
         None, "--aoi", "-a", help="GeoJSON AOI (defaults to full raster)"
     ),
     output: Path = typer.Option("./output", "--output", "-o"),
-    detector: str = typer.Option(
-        None,
-        "--detector",
-        help="Detector name (default from settings.detector_name)",
+    detectors: str = typer.Option(
+        ...,
+        "--detectors",
+        help=(
+            "JSON list of detector specs, e.g. "
+            '\'[{"name":"yolov8-obb-aerial","classes":["ship"]},'
+            '{"name":"segformer-landscape","classes":["building","road"],'
+            '"min_confidence":0.5}]\''
+        ),
     ),
     use_temporal: bool = typer.Option(
         False,
@@ -30,16 +35,25 @@ def run(
         help="Submit job to Temporal instead of running locally",
     ),
 ) -> None:
+    parsed = json.loads(detectors)
     if use_temporal:
-        asyncio.run(_run_temporal(input, aoi, output))
+        asyncio.run(_run_temporal(input, aoi, output, parsed))
     else:
-        _run_local(input, aoi, output, detector)
+        _run_local(input, aoi, output, parsed)
 
 
 def _run_local(
-    input_path: Path, aoi_path: Path | None, output_dir: Path, detector_name: str | None
+    input_path: Path,
+    aoi_path: Path | None,
+    output_dir: Path,
+    detector_specs: list[dict],
 ) -> None:
-    from core.detection import build_detector, filter_detections, render_overlay
+    from core.detection import (
+        DetectorSpec,
+        build_from_specs,
+        filter_detections,
+        render_overlay,
+    )
     from core.services.exporter import GISExporterService
     from core.services.imagery import ImageryLoaderService
     from core.services.indicators import IndicatorCalculatorService
@@ -57,7 +71,8 @@ def _run_local(
     typer.echo(f"  Shape: {raster.data.shape}, CRS: {raster.crs}")
 
     typer.echo("Running detection...")
-    det = build_detector(detector_name)
+    specs = DetectorSpec.list_from_config({"detectors": detector_specs})
+    det = build_from_specs(specs)
     detections = det.detect(raster)
     typer.echo(f"  Raw detections: {len(detections)} via {det.name}")
 
@@ -87,7 +102,10 @@ def _run_local(
 
 
 async def _run_temporal(
-    input_path: Path, aoi_path: Path | None, output_dir: Path
+    input_path: Path,
+    aoi_path: Path | None,
+    output_dir: Path,
+    detector_specs: list[dict],
 ) -> None:
     from temporalio.client import Client
 
@@ -100,7 +118,11 @@ async def _run_temporal(
     async with async_session_factory() as session:
         job = ProcessingJob(
             input_path=str(input_path),
-            config={"aoi": aoi_geojson, "aoi_crs": "EPSG:4326"},
+            config={
+                "aoi": aoi_geojson,
+                "aoi_crs": "EPSG:4326",
+                "detectors": detector_specs,
+            },
         )
         session.add(job)
         await session.commit()

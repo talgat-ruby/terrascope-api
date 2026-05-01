@@ -11,7 +11,12 @@ from temporalio import activity
 
 from core.config import settings
 from core.database import async_session_factory
-from core.detection import build_detector, filter_detections, render_overlay
+from core.detection import (
+    DetectorSpec,
+    build_from_specs,
+    filter_detections,
+    render_overlay,
+)
 from core.detection.types import Raster
 from core.models.detection import Detection
 from core.models.processing import JobStatus
@@ -42,8 +47,8 @@ async def detect(job_id: str) -> dict:
 
             raster = Raster(data=data, transform=transform, crs=crs, aoi_geom=aoi_geom)
 
-            detector_name = (job.config or {}).get("detector_name")
-            detector = await asyncio.to_thread(build_detector, detector_name)
+            specs = DetectorSpec.list_from_config(job.config or {})
+            detector = await asyncio.to_thread(build_from_specs, specs)
 
             min_confidence = (job.config or {}).get("min_confidence", 0.25)
 
@@ -75,6 +80,7 @@ async def detect(job_id: str) -> dict:
                 checkpoint_update={
                     "detect": {
                         "detector": detector.name,
+                        "detectors": [s.name for s in specs],
                         "detection_count": len(detections),
                         "overlay_path": str(overlay_path),
                     }

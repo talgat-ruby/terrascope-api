@@ -49,6 +49,7 @@ def _make_detection() -> DomainDetection:
         bbox=bnds,
         pixel_bbox=(10, 10, 30, 30),
         centroid=box(*bnds).centroid,
+        source_model="test",
     )
 
 
@@ -107,6 +108,14 @@ async def test_detect_success(mock_session, tmp_path):
     np.save(clipped_path, np.zeros((10, 10, 3), dtype=np.uint8))
 
     job = _make_job(
+        config={
+            "aoi": {
+                "type": "Polygon",
+                "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]],
+            },
+            "aoi_crs": "EPSG:4326",
+            "detectors": [{"name": "yolov8n-sahi"}],
+        },
         checkpoint_data={
             "load": {
                 "crs": "EPSG:4326",
@@ -122,7 +131,7 @@ async def test_detect_success(mock_session, tmp_path):
                 "shape": [10, 10, 3],
                 "aoi_wkt": box(0, 0, 1, 1).wkt,
             }
-        }
+        },
     )
     _setup_job_query(mock_session, job)
 
@@ -135,7 +144,9 @@ async def test_detect_success(mock_session, tmp_path):
             "worker.activities.detection.async_session_factory",
             return_value=mock_session,
         ),
-        patch("worker.activities.detection.build_detector", return_value=stub_detector),
+        patch(
+            "worker.activities.detection.build_from_specs", return_value=stub_detector
+        ),
         patch("worker.activities.detection.render_overlay") as mock_render,
         patch("worker.activities.detection.settings") as mock_settings,
     ):

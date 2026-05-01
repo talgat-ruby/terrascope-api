@@ -23,6 +23,7 @@ def _det(pixel_bbox: tuple[int, int, int, int], class_name: str = "car") -> Dete
         bbox=(0, 0, 1, 1),
         pixel_bbox=pixel_bbox,
         centroid=box(0, 0, 1, 1).centroid,
+        source_model="test",
     )
 
 

@@ -199,6 +199,7 @@ class SegformerLandscapeDetector:
                         bbox=geo_bbox,
                         pixel_bbox=(c0, r0, c1, r1),
                         centroid=centroid,
+                        source_model=self.name,
                     )
                 )
                 counter += 1

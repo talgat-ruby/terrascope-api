@@ -27,6 +27,7 @@ class _StubDetector:
                 bbox=b1,
                 pixel_bbox=(10, 10, 30, 30),
                 centroid=box(*b1).centroid,
+                source_model="stub",
             ),
             Detection(
                 id=1,
@@ -35,6 +36,7 @@ class _StubDetector:
                 bbox=b2,
                 pixel_bbox=(40, 40, 60, 60),
                 centroid=box(*b2).centroid,
+                source_model="stub",
             ),
         ]
 

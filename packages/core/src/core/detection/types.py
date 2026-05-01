@@ -49,6 +49,7 @@ class Detection:
     `pixel_bbox` is (col_min, row_min, col_max, row_max) in the raster's pixel
     grid — kept so the renderer can draw without re-projecting.
     `id` is assigned sequentially after filtering (0..N).
+    `source_model` records which detector emitted the detection.
     """
 
     id: int
@@ -57,12 +58,13 @@ class Detection:
     bbox: tuple[float, float, float, float]
     pixel_bbox: tuple[int, int, int, int]
     centroid: Point
+    source_model: str
 
 
 class Detector(Protocol):
     """Pluggable detector contract.
 
-    Implementations are looked up by `name` via `build_detector`. Each call
+    Implementations are looked up by `name` via `build_from_specs`. Each call
     to `detect` is independent; implementations are free to cache models on
     instance state.
     """

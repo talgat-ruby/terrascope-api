@@ -1,27 +1,27 @@
 """Detector factory.
 
 Pluggable lookup keyed by detector `name`. Adding a new implementation is one
-entry in `_BUILDERS`. The orchestrator never imports detector modules
-directly.
+entry in `_BUILDERS`. Multi-model orchestration is expressed via a list of
+`DetectorSpec` and assembled by `build_from_specs`.
 
-Built-in detectors:
+Built-in leaf detectors:
 
 - `yolov8n-sahi`        COCO-pretrained YOLOv8n (80 generic classes).
-                        Noisy on aerial imagery (TV/clock false positives).
-- `yolov8-obb-aerial`   DOTA-pretrained YOLOv8s-OBB (15 aerial object
-                        classes: plane, ship, vehicle, harbor, bridge, ...).
-                        Does NOT include building / road / vegetation.
-- `segformer-landscape` HuggingFace SegFormer-ADE20K. Per-pixel land-cover
-                        segmentation -> bbox per connected component.
-                        Surfaces building, road, grass, water, tree,
-                        earth, sand, mountain.
-- `aerial+landscape`    CompositeDetector running `yolov8-obb-aerial` and
-                        `segformer-landscape` together. Yields both object
-                        bboxes (ships, vehicles, planes) and land-cover
-                        regions (buildings, roads, grass, water, ...).
+- `yolov8-obb-aerial`   DOTA-pretrained YOLOv8s-OBB (15 aerial classes:
+                        plane, ship, vehicle, harbor, bridge, ...).
+- `yolov8-satellite-vehicle`  HuggingFace
+                        `keremberke/yolov8m-satellite-vehicle-detection`
+                        finetuned for cars on satellite imagery.
+- `yolov8-obb-dota-v2`  Ultralytics DOTA v2 OBB (sports fields, bridge,
+                        small/large-vehicle, harbor, ...).
+- `segformer-landscape` HuggingFace SegFormer-ADE20K landscape segmenter.
+- `beit-ade`            HuggingFace `microsoft/beit-large-finetuned-ade-640-640`
+                        — higher-capacity ADE20K segmenter (slower than
+                        segformer-b0, but better building/vegetation recall).
 
-To use a custom YOLO checkpoint, point `settings.yolo_weights` at any
-Ultralytics-loadable `.pt` file.
+Multi-class presets typically combine a segmenter (for area classes:
+building, road, vegetation, water) with an OBB detector (for object classes:
+car, sports field, bridge). See `docs/classe-model.md`.
 """
 
 from __future__ import annotations
@@ -30,6 +30,8 @@ from collections.abc import Callable
 from typing import Any
 
 from core.config import settings
+from core.detection.composite import CompositeDetector
+from core.detection.spec import DetectorSpec
 from core.detection.types import Detector
 
 
@@ -59,6 +61,36 @@ def _build_yolo_obb_aerial(**kwargs: Any) -> Detector:
     )
 
 
+def _build_yolo_obb_dota_v2(**kwargs: Any) -> Detector:
+    """DOTA v2 OBB checkpoint (more sports/vehicle subclasses than v1)."""
+    from core.detection.yolo_sahi import YoloSahiDetector
+
+    return YoloSahiDetector(
+        weights=kwargs.get("weights", "yolov8x-obb.pt"),
+        device=kwargs.get("device", settings.device),
+        confidence_threshold=kwargs.get(
+            "confidence_threshold", settings.min_confidence
+        ),
+        name="yolov8-obb-dota-v2",
+    )
+
+
+def _build_yolo_satellite_vehicle(**kwargs: Any) -> Detector:
+    """Keremberke's YOLOv8m finetuned on satellite vehicle imagery."""
+    from core.detection.yolo_sahi import YoloSahiDetector
+
+    return YoloSahiDetector(
+        weights=kwargs.get(
+            "weights", "keremberke/yolov8m-satellite-vehicle-detection"
+        ),
+        device=kwargs.get("device", settings.device),
+        confidence_threshold=kwargs.get(
+            "confidence_threshold", settings.min_confidence
+        ),
+        name="yolov8-satellite-vehicle",
+    )
+
+
 def _build_segformer_landscape(**kwargs: Any) -> Detector:
     from core.detection.segformer_landscape import SegformerLandscapeDetector
 
@@ -71,31 +103,59 @@ def _build_segformer_landscape(**kwargs: Any) -> Detector:
     )
 
 
-def _build_aerial_plus_landscape(**kwargs: Any) -> Detector:
-    from core.detection.composite import CompositeDetector
+def _build_beit_ade(**kwargs: Any) -> Detector:
+    """BEiT-large finetuned on ADE20K — higher-capacity drop-in replacement.
 
-    return CompositeDetector(
-        children=[
-            _build_yolo_obb_aerial(**kwargs),
-            _build_segformer_landscape(**kwargs),
-        ],
-        name="aerial+landscape",
+    Reuses the SegformerLandscapeDetector pipeline (HF
+    AutoModelForSemanticSegmentation + AutoImageProcessor); the ADE20K label
+    space is the same, so the existing `_ADE_LANDSCAPE_LABELS` mapping
+    applies as-is.
+    """
+    from core.detection.segformer_landscape import SegformerLandscapeDetector
+
+    return SegformerLandscapeDetector(
+        model_name=kwargs.get(
+            "model_name", "microsoft/beit-large-finetuned-ade-640-640"
+        ),
+        device=kwargs.get("device", settings.device),
+        max_dim=kwargs.get("max_dim", settings.landscape_max_dim),
+        min_pixels=kwargs.get("min_pixels", settings.landscape_min_pixels),
+        name="beit-ade",
     )
 
 
 _BUILDERS: dict[str, Callable[..., Detector]] = {
     "yolov8n-sahi": _build_yolo_sahi,
     "yolov8-obb-aerial": _build_yolo_obb_aerial,
+    "yolov8-obb-dota-v2": _build_yolo_obb_dota_v2,
+    "yolov8-satellite-vehicle": _build_yolo_satellite_vehicle,
     "segformer-landscape": _build_segformer_landscape,
-    "aerial+landscape": _build_aerial_plus_landscape,
+    "beit-ade": _build_beit_ade,
 }
 
 
-def build_detector(name: str | None = None, **kwargs: Any) -> Detector:
-    """Resolve `name` (or `settings.detector_name`) to a Detector instance."""
-    key = name or settings.detector_name
+def build_leaf(spec: DetectorSpec) -> Detector:
+    """Resolve a single spec to a leaf Detector instance."""
     try:
-        return _BUILDERS[key](**kwargs)
+        builder = _BUILDERS[spec.name]
     except KeyError:
         known = ", ".join(sorted(_BUILDERS))
-        raise ValueError(f"Unknown detector {key!r}. Known: {known}") from None
+        raise ValueError(
+            f"Unknown detector {spec.name!r}. Known: {known}"
+        ) from None
+    return builder(**spec.kwargs)
+
+
+def build_from_specs(specs: list[DetectorSpec]) -> Detector:
+    """Build a Detector from a list of specs.
+
+    A single spec returns the leaf detector directly; multiple specs are
+    wrapped in a `CompositeDetector` that enforces each spec's class
+    allowlist and confidence override.
+    """
+    if not specs:
+        raise ValueError("build_from_specs requires at least one spec")
+    if len(specs) == 1 and specs[0].classes is None and specs[0].min_confidence is None:
+        return build_leaf(specs[0])
+    pairs = [(build_leaf(spec), spec) for spec in specs]
+    return CompositeDetector(pairs=pairs)

@@ -1,30 +1,40 @@
-"""CompositeDetector -- run multiple Detectors and merge their output.
+"""CompositeDetector -- run multiple Detectors with per-detector class
+allowlists and confidence thresholds, then merge their output.
 
-Each child Detector is invoked independently against the same Raster; the
-returned `Detection` lists are concatenated and renumbered with sequential
-ids. Useful for combining an object detector (e.g., DOTA-trained YOLO) with
-a landscape segmenter (e.g., SegFormer-ADE20K) so a single run yields both
-object bboxes and land-cover regions.
+Each child runs independently against the same Raster. Outputs are filtered
+to the spec's class allowlist and confidence floor, stamped with provenance,
+and concatenated with sequential ids.
 """
 
 from __future__ import annotations
 
 from dataclasses import replace
 
+from core.detection.spec import DetectorSpec
 from core.detection.types import Detection, Detector, Raster
 
 
 class CompositeDetector:
-    """Pluggable Detector that composes multiple child Detectors."""
+    """Pluggable Detector composing multiple child Detectors with specs."""
 
-    def __init__(self, children: list[Detector], name: str = "composite") -> None:
-        if not children:
+    name = "composite"
+
+    def __init__(self, pairs: list[tuple[Detector, DetectorSpec]]) -> None:
+        if not pairs:
             raise ValueError("CompositeDetector requires at least one child")
-        self.children = children
-        self.name = name
+        self.pairs = pairs
 
     def detect(self, raster: Raster) -> list[Detection]:
         merged: list[Detection] = []
-        for child in self.children:
-            merged.extend(child.detect(raster))
+        for child, spec in self.pairs:
+            allow = set(spec.classes) if spec.classes is not None else None
+            min_conf = spec.min_confidence
+            for det in child.detect(raster):
+                if allow is not None and det.class_name not in allow:
+                    continue
+                if min_conf is not None and det.confidence < min_conf:
+                    continue
+                if det.source_model != child.name:
+                    det = replace(det, source_model=child.name)
+                merged.append(det)
         return [replace(d, id=i) for i, d in enumerate(merged)]

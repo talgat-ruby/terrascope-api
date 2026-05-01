@@ -21,6 +21,7 @@ def make_detection(
     confidence: float = 0.85,
     bounds: tuple[float, float, float, float] = (0.1, 0.1, 0.2, 0.2),
     pixel_bbox: tuple[int, int, int, int] = (10, 10, 20, 20),
+    source_model: str = "test",
 ) -> Detection:
     """Build a domain Detection for tests."""
     return Detection(
@@ -30,6 +31,7 @@ def make_detection(
         bbox=bounds,
         pixel_bbox=pixel_bbox,
         centroid=box(*bounds).centroid,
+        source_model=source_model,
     )
 
 

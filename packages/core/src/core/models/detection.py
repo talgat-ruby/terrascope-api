@@ -14,6 +14,7 @@ class Detection(SQLModel, table=True):
     )
     class_name: str = Field(index=True)
     confidence: float
+    source_model: str = Field(index=True)
     # Bbox polygon. Centroid is recomputed at export time.
     geometry: str | None = Field(
         default=None,

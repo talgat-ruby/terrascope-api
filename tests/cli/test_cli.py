@@ -33,6 +33,7 @@ def _make_detection() -> Detection:
         bbox=bnds,
         pixel_bbox=(10, 10, 30, 30),
         centroid=box(*bnds).centroid,
+        source_model="stub",
     )
 
 
@@ -60,7 +61,7 @@ def test_process_local_runs_pipeline(tmp_path: Path):
     with (
         patch("core.services.imagery.ImageryLoaderService") as MockLoader,
         patch(
-            "core.detection.build_detector", return_value=stub_detector
+            "core.detection.build_from_specs", return_value=stub_detector
         ) as MockBuild,
         patch("core.detection.render_overlay") as MockRender,
         patch("core.services.exporter.GISExporterService") as MockExporter,
@@ -82,6 +83,8 @@ def test_process_local_runs_pipeline(tmp_path: Path):
                 str(aoi_path),
                 "--output",
                 str(output_dir),
+                "--detectors",
+                '[{"name":"yolov8n-sahi"}]',
             ],
         )
 
@@ -120,6 +123,8 @@ def test_process_temporal_flag(tmp_path: Path):
                 "--aoi",
                 str(aoi_path),
                 "--use-temporal",
+                "--detectors",
+                '[{"name":"yolov8n-sahi"}]',
             ],
         )
 

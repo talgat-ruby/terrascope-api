@@ -50,7 +50,6 @@ class Settings(BaseSettings):
     model_cache_dir: Path = Path("model_cache")
 
     # Detection
-    detector_name: str = "yolov8n-sahi"
     yolo_weights: str = "yolov8n.pt"
     min_confidence: float = 0.25
     landscape_model: str = "nvidia/segformer-b0-finetuned-ade-512-512"

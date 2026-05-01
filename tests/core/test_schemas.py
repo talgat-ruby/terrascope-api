@@ -19,10 +19,12 @@ def test_detection_create():
     d = DetectionCreate(
         class_name="car",
         confidence=0.85,
+        source_model="yolov8n-sahi",
         geometry=_BBOX,
     )
     assert d.class_name == "car"
     assert d.confidence == 0.85
+    assert d.source_model == "yolov8n-sahi"
 
 
 def test_detection_response():
@@ -31,6 +33,7 @@ def test_detection_response():
         job_id=uuid.uuid4(),
         class_name="building",
         confidence=0.7,
+        source_model="segformer-landscape",
         geometry=_BBOX,
         centroid=_POINT,
     )
