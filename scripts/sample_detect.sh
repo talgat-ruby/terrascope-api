@@ -25,8 +25,8 @@
 
 set -euo pipefail
 
-INPUT="inputs/Astana_8.tif"
-OUT_BASE="outputs/Astana8_1"
+INPUT="inputs/Astana_4.tif"
+OUT_BASE="outputs/Astana4_1"
 
 # ---------- a) segformer-landscape (landcover only) ----------
 # uv run terrascope process \
@@ -36,6 +36,30 @@ OUT_BASE="outputs/Astana8_1"
 #     {"name": "segformer-landscape",
 #      "classes": ["building", "road", "tree", "grass", "water"]}
 #   ]'
+
+# ---------- a2) aerial-road-segmenter (nadir/aerial-trained roads) ----------
+# Reuses the SegFormer pipeline with a caller-supplied HF checkpoint and
+# label_map. The default below uses Thalirajesh/Aerial-Drone-Image-Segmentation,
+# a SegFormer-B0 finetuned on the Semantic Drone Dataset (Graz) — 24 classes
+# including `paved-area`, `dirt`, `gravel` from drone/near-nadir altitudes.
+# More appropriate for aerial road extraction than ADE20K-trained
+# segformer-landscape / beit-ade, which were trained on street-level imagery
+# and frequently miss roads entirely on nadir satellite/drone rasters.
+#
+# Other checkpoints worth trying: any SegFormer finetuned on DeepGlobe Roads,
+# SpaceNet Roads, LoveDA, or Massachusetts Roads. Adjust label_map to match
+# that checkpoint's id2label vocabulary.
+uv run terrascope process \
+  --input "$INPUT" \
+  --output "$OUT_BASE/aerial-road-segmenter" \
+  --detectors '[
+    {"name": "aerial-road-segmenter",
+     "classes": ["road"],
+     "kwargs": {"model_name": "Thalirajesh/Aerial-Drone-Image-Segmentation",
+                "label_map": {"paved-area": "road",
+                              "gravel": "road",
+                              "dirt": "road"}}}
+  ]'
 
 # ---------- b) beit-ade (same labels, larger backbone) ----------
 # uv run terrascope process \
@@ -92,15 +116,15 @@ OUT_BASE="outputs/Astana8_1"
 # ---------- g) combined: minimal 7-class setup (RECOMMENDED) ----------
 # Landcover via SegFormer + objects via DOTA v2 OBB. Covers all 7 classes
 # (building, road, park[tree+grass], water, car, sports_field, bridge).
-uv run terrascope process \
-  --input "$INPUT" \
-  --output "$OUT_BASE/combined" \
-  --detectors '[
-    {"name": "segformer-landscape",
-     "classes": ["building", "road", "tree", "grass", "water"]},
-    {"name": "yolov8-obb-dota-v2",
-     "classes": ["small-vehicle", "large-vehicle",
-                 "tennis-court", "basketball-court", "soccer-ball-field",
-                 "baseball-diamond", "ground-track-field",
-                 "bridge"]}
-  ]'
+# uv run terrascope process \
+#   --input "$INPUT" \
+#   --output "$OUT_BASE/combined" \
+#   --detectors '[
+#     {"name": "segformer-landscape",
+#      "classes": ["building", "road", "tree", "grass", "water"]},
+#     {"name": "yolov8-obb-dota-v2",
+#      "classes": ["small-vehicle", "large-vehicle",
+#                  "tennis-court", "basketball-court", "soccer-ball-field",
+#                  "baseball-diamond", "ground-track-field",
+#                  "bridge"]}
+#   ]'

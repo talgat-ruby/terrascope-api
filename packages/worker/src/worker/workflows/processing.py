@@ -64,7 +64,7 @@ class ProcessingWorkflow:
         await workflow.execute_activity(
             finalize_job,
             job_id,
-            start_to_close_timeout=timedelta(minutes=1),
+            start_to_close_timeout=timedelta(minutes=10),
             retry_policy=_default_retry,
         )
 

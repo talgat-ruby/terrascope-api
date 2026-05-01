@@ -12,8 +12,13 @@ unviable at the project's GSD).
 - `SAM` + finetune via `samgeo` _(no HF preset wired)_
 
 ## 2. Road
-- `segformer-landscape` (ADE20K — surfaces `road`, `sidewalk`, `path`, `runway`)
-- `beit-ade` (same label space, larger backbone)
+- `aerial-road-segmenter` — **recommended for nadir imagery.** Reuses the
+  HF SemanticSegmentation pipeline; pass any aerial-road-finetuned
+  checkpoint via `kwargs.model_name` plus a `kwargs.label_map` mapping
+  the checkpoint's `id2label` strings to `road`.
+- `segformer-landscape` (ADE20K — surfaces `road`, `sidewalk`, `path`, `runway`).
+  ADE20K is street-level/oblique; on true nadir often misses roads entirely.
+- `beit-ade` (same label space, larger backbone) — same domain caveat.
 - `D-LinkNet` (DeepGlobe Challenge 2018) _(custom backend required)_
 - `SegFormer` finetuned on DeepGlobe _(custom finetune required)_
 
@@ -72,6 +77,7 @@ checkpoint for that class.
 | `yolov8-satellite-vehicle` | `keremberke/yolov8m-satellite-vehicle-detection`          |
 | `segformer-landscape`      | `nvidia/segformer-b0-finetuned-ade-512-512`               |
 | `beit-ade`                 | `microsoft/beit-large-finetuned-ade-640-640`              |
+| `aerial-road-segmenter`    | user-supplied HF checkpoint (nadir-trained roads)         |
 
 Anything marked _custom backend required_ above (D-LinkNet, RT-DETR,
 Faster R-CNN-DIOR, ISPRS-Potsdam-finetuned SegFormer, etc.) needs a new

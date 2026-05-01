@@ -55,6 +55,9 @@ class Settings(BaseSettings):
     landscape_model: str = "nvidia/segformer-b0-finetuned-ade-512-512"
     landscape_max_dim: int = 1024  # downsample raster long-side cap for the segmenter
     landscape_min_pixels: int = 200  # drop connected components smaller than this
+    aerial_road_model: str = ""  # nadir-trained road segmenter; user-supplied per job
+    aerial_road_max_dim: int = 2048  # roads are thin — keep more resolution
+    aerial_road_min_pixels: int = 50  # thin roads have small CC area
     device: str = Field(
         default_factory=lambda: (
             (

@@ -71,6 +71,7 @@ class SegformerLandscapeDetector:
         min_pixels: int = 200,
         confidence_threshold: float = 0.0,
         name: str = "segformer-landscape",
+        label_map: dict[str, str] | None = None,
     ) -> None:
         self.name = name
         self.model_name = model_name
@@ -78,6 +79,7 @@ class SegformerLandscapeDetector:
         self.max_dim = max_dim
         self.min_pixels = min_pixels
         self.confidence_threshold = confidence_threshold
+        self._label_map = label_map if label_map is not None else _ADE_LANDSCAPE_LABELS
         self._model = None  # type: ignore[assignment]
         self._processor = None  # type: ignore[assignment]
         self._id2name: dict[int, str] = {}
@@ -146,7 +148,7 @@ class SegformerLandscapeDetector:
             ade_name = (
                 self._id2name.get(int(class_id), "").strip().lower().split(",")[0]
             )
-            mapped = _ADE_LANDSCAPE_LABELS.get(ade_name)
+            mapped = self._label_map.get(ade_name)
             if mapped is None:
                 continue
 

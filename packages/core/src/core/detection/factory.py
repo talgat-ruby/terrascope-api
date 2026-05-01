@@ -124,6 +124,34 @@ def _build_beit_ade(**kwargs: Any) -> Detector:
     )
 
 
+def _build_aerial_road(**kwargs: Any) -> Detector:
+    """Nadir-trained road segmenter.
+
+    Reuses the SegformerLandscapeDetector pipeline with a caller-supplied
+    `model_name` (a HF checkpoint finetuned on aerial/satellite road data)
+    and a caller-supplied `label_map` mapping the checkpoint's id2label
+    strings onto the unified `road` class.
+    """
+    from core.detection.segformer_landscape import SegformerLandscapeDetector
+
+    model_name = kwargs.get("model_name") or settings.aerial_road_model
+    if not model_name:
+        raise ValueError(
+            "aerial-road-segmenter requires kwargs.model_name "
+            "(or settings.aerial_road_model) — pick a HF checkpoint "
+            "trained on nadir/aerial road data"
+        )
+    label_map = kwargs.get("label_map") or {"road": "road"}
+    return SegformerLandscapeDetector(
+        model_name=model_name,
+        device=kwargs.get("device", settings.device),
+        max_dim=kwargs.get("max_dim", settings.aerial_road_max_dim),
+        min_pixels=kwargs.get("min_pixels", settings.aerial_road_min_pixels),
+        name="aerial-road-segmenter",
+        label_map=label_map,
+    )
+
+
 _BUILDERS: dict[str, Callable[..., Detector]] = {
     "yolov8n-sahi": _build_yolo_sahi,
     "yolov8-obb-aerial": _build_yolo_obb_aerial,
@@ -131,6 +159,7 @@ _BUILDERS: dict[str, Callable[..., Detector]] = {
     "yolov8-satellite-vehicle": _build_yolo_satellite_vehicle,
     "segformer-landscape": _build_segformer_landscape,
     "beit-ade": _build_beit_ade,
+    "aerial-road-segmenter": _build_aerial_road,
 }
 
 
