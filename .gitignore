@@ -1,0 +1,28 @@
+# Dataset (слишком большой — качай отдельно)
+Dataset/
+cowc_potsdam/raw/
+cowc_potsdam/yolo/
+
+# Виртуальное окружение
+.venv_nuris/
+venv/
+.venv/
+__pycache__/
+*.pyc
+
+# Другие модели и чекпоинты (кроме best.pt в корне)
+terrascope-api/
+runs/
+*.pt
+!best.pt
+
+# Временные файлы
+_tmp_patch.png
+*.DS_Store
+*.aux.xml
+
+# Результаты (генерируются при запуске)
+results/
+*.png
+!cowc_samples.png
+!zero_shot_analysis.png
