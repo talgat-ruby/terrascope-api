@@ -1,6 +1,5 @@
-"""Local + Temporal entry points for the detection pipeline."""
+"""Local entry point for the detection pipeline."""
 
-import asyncio
 import json
 from pathlib import Path
 
@@ -29,17 +28,9 @@ def run(
             '"min_confidence":0.5}]\''
         ),
     ),
-    use_temporal: bool = typer.Option(
-        False,
-        "--use-temporal",
-        help="Submit job to Temporal instead of running locally",
-    ),
 ) -> None:
     parsed = json.loads(detectors)
-    if use_temporal:
-        asyncio.run(_run_temporal(input, aoi, output, parsed))
-    else:
-        _run_local(input, aoi, output, parsed)
+    _run_local(input, aoi, output, parsed)
 
 
 def _run_local(
@@ -103,46 +94,3 @@ def _run_local(
             typer.echo(f"  Indicators: {indicators_dir}")
 
     typer.echo("Done.")
-
-
-async def _run_temporal(
-    input_path: Path,
-    aoi_path: Path | None,
-    output_dir: Path,
-    detector_specs: list[dict],
-) -> None:
-    from temporalio.client import Client
-
-    from core.database import async_session_factory
-    from core.models.processing import ProcessingJob
-    from worker.workflows.processing import ProcessingWorkflow
-
-    aoi_geojson = json.loads(aoi_path.read_text()) if aoi_path is not None else None
-
-    async with async_session_factory() as session:
-        job = ProcessingJob(
-            input_path=str(input_path),
-            config={
-                "aoi": aoi_geojson,
-                "aoi_crs": "EPSG:4326",
-                "detectors": detector_specs,
-            },
-        )
-        session.add(job)
-        await session.commit()
-        await session.refresh(job)
-        job_id = str(job.id)
-
-    typer.echo(f"Created job: {job_id}")
-
-    client = await Client.connect(settings.temporal_address)
-    handle = await client.start_workflow(
-        ProcessingWorkflow.run,
-        job_id,
-        id=f"processing-{job_id}",
-        task_queue=settings.temporal_task_queue,
-    )
-    typer.echo(f"Started workflow: {handle.id}")
-    result = await handle.result()
-    typer.echo(f"Workflow completed: {result['status']}")
-    typer.echo(f"Output directory: {output_dir}")

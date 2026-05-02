@@ -4,18 +4,16 @@
 
 Terrascope is a satellite imagery analysis system that detects objects (buildings, roads, vegetation, water) in GeoTIFF imagery and exports results as GIS layers (GeoJSON, GeoPackage). It computes zone-level indicators and quality metrics.
 
-**Tech stack:** Python 3.14, FastAPI, SQLModel, PostgreSQL + PostGIS, Temporal, PyTorch + TorchGeo + SAMGeo, uv workspaces monorepo. Linting with ruff and pyright.
+**Tech stack:** Python 3.14, SQLModel, PostgreSQL + PostGIS, PyTorch + TorchGeo + SAMGeo, uv workspaces monorepo. Linting with ruff and pyright.
 
 ## Repository Structure
 
 ```
 packages/
   core/    # Shared models, schemas, services, config, database
-  api/     # FastAPI application and routers
-  worker/  # Temporal workflows and activities
   cli/     # Typer CLI tool
   core/alembic/  # Database migrations (inside core package)
-infra/     # Docker Compose configs (Postgres, Temporal, Elasticsearch)
+infra/     # Docker Compose configs (Postgres)
 tests/     # Mirrors packages/ structure
 docs/      # Assignment spec and implementation plan
 ```
@@ -32,12 +30,6 @@ uv run alembic -c packages/core/src/core/alembic.ini upgrade head
 ## Common Commands
 
 ```bash
-# Run API (dev mode with auto-reload, port from API_PORT in .env)
-uv run python -m api.main
-
-# Run Temporal worker
-uv run python -m worker.main
-
 # Run tests
 uv run pytest
 
@@ -59,11 +51,9 @@ uv run alembic -c packages/core/src/core/alembic.ini upgrade head
 ## Architecture & Conventions
 
 - **Monorepo via uv workspaces** - each package under `packages/` has its own `pyproject.toml`; root `pyproject.toml` declares the workspace
-- **Async everywhere** - AsyncPG, async SQLAlchemy sessions, async FastAPI endpoints
+- **Async everywhere** - AsyncPG, async SQLAlchemy sessions
 - **SQLModel** - combined ORM + Pydantic validation in a single class. Models live in `packages/core/src/core/models/`
 - **PostGIS** - all geometry stored with SRID=4326 using GeoAlchemy2
-- **Temporal workflows** - workflow is a `@workflow.defn` class; activities are standalone `@activity.defn` async functions
-- **Dependency injection** - FastAPI `Depends()` for DB sessions (`get_db()`) and Temporal client (`get_temporal_client()`)
 - **Config** - pydantic-settings `Settings` class in `core/config.py`, reads from `.env`
 - **CRS propagation** - CRS is passed explicitly through the pipeline: `clip_to_aoi()` returns CRS string, `Tile` has `crs` field, model wrappers accept `crs` param
 - **Geodesic accuracy** - use `pyproj.Geod(ellps="WGS84")` for area/distance computations on geographic coordinates, not raw `geometry.area`
@@ -89,18 +79,13 @@ uv run alembic -c packages/core/src/core/alembic.ini upgrade head
 
 - pytest with `asyncio_mode=auto`
 - Test files mirror source structure under `tests/`
-- Use `httpx.AsyncClient` for API endpoint tests
 - Integration tests go in `tests/integration/`
 
 ## Key Ports (Local Development)
 
-| Service       | Port  |
-|---------------|-------|
-| API           | 30001 |
-| PostgreSQL    | 35432 |
-| Temporal      | 37233 |
-| Temporal UI   | 38080 |
-| Elasticsearch | 39200 |
+| Service    | Port  |
+|------------|-------|
+| PostgreSQL | 35432 |
 
 ## Implementation Plan
 

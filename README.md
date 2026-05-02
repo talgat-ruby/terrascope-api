@@ -25,9 +25,8 @@ without rewriting the pipeline.
 
 - Python 3.14+
 - [uv](https://docs.astral.sh/uv/) workspaces (monorepo)
-- FastAPI + SQLModel + AsyncPG
+- SQLModel + AsyncPG
 - PostgreSQL + PostGIS
-- Temporal workflows
 - Ultralytics YOLO + [SAHI](https://github.com/obss/sahi) for sliced inference
 - Pillow for the PNG overlay
 - GeoPandas / Shapely / rasterio / pyproj
@@ -53,11 +52,8 @@ packages/
       models/      SQLModel tables (Detection, ProcessingJob, Territory, ...)
       schemas/     Pydantic API schemas
       alembic/     DB migrations
-  api/             FastAPI application
-  worker/          Temporal workflow + activities
-                   (load -> detect -> export -> indicators -> finalize)
-  cli/             Typer CLI (process, stac, worker, db)
-infra/compose/     Postgres, Temporal, Elasticsearch
+  cli/             Typer CLI (process, stac, db)
+infra/compose/     Postgres
 inputs/            Sample GeoTIFFs
 outputs/           Per-job artifacts
 tests/             Mirrors packages/
@@ -72,10 +68,6 @@ Load GeoTIFF -> Detect (Detector + filter) -> Render PNG + Export GeoJSON
 
 There is no separate tiling step. SAHI slices large rasters and merges
 predictions internally; the orchestrator does not see tiles.
-
-The Temporal flow is the same five activities (`load_imagery → detect →
-export_results → compute_indicators → finalize_job`); the `detect` activity
-also renders the PNG so pixel-space bboxes don't need to be persisted.
 
 ## Setup
 
@@ -111,8 +103,6 @@ Flags:
   has `name` (factory key), optional `classes` (allowlist), optional
   `min_confidence`, optional `kwargs`.
 - `--aoi path/to/aoi.geojson` — clip to a polygon AOI
-- `--use-temporal` — submit the job to a running Temporal worker instead of
-  running locally
 
 Registered detector names: `yolov8n-sahi`, `yolov8-obb-aerial`,
 `yolov8-obb-dota-v2`, `yolov8-satellite-vehicle`, `segformer-landscape`,
@@ -124,47 +114,9 @@ Other CLI subcommands:
 # STAC catalog search
 uv run terrascope stac search --bbox 10.0,49.0,11.0,50.0 --datetime 2024-01-01/2024-06-01
 
-# Start the Temporal worker (alternative to `python -m worker.main`)
-uv run terrascope worker
-
 # Run alembic from the CLI
 uv run terrascope db upgrade
 ```
-
-## API + Temporal worker
-
-Each in its own terminal:
-
-```bash
-uv run python -m api.main      # FastAPI on $API_PORT (default 30001)
-uv run python -m worker.main   # Temporal worker
-```
-
-Submit a job:
-
-```bash
-curl -X POST http://localhost:30001/processing/start \
-  -H "Content-Type: application/json" \
-  -d '{
-        "input_path": "/abs/path/to/raster.tif",
-        "config": {
-          "detectors": [
-            {"name": "yolov8-obb-aerial", "classes": ["ship", "large vehicle"]},
-            {"name": "segformer-landscape", "classes": ["building", "road"]}
-          ]
-        }
-      }'
-```
-
-Poll, then download:
-
-```bash
-curl http://localhost:30001/processing/<job_id>/status
-curl -OJ "http://localhost:30001/results/<job_id>/download?format=png"
-curl -OJ "http://localhost:30001/results/<job_id>/download?format=geojson"
-```
-
-API docs at <http://localhost:30001/docs>.
 
 ## How detection works
 
@@ -209,8 +161,8 @@ Built-in detectors:
 | `beit-ade`                 | `microsoft/beit-large-finetuned-ade` | Same ADE20K classes; higher-capacity backbone                 |
 
 Adding a new detector is one entry in `_BUILDERS` plus a class implementing
-the `Detector` protocol. The orchestrator, worker, exporter, and DB schema
-do not change.
+the `Detector` protocol. The orchestrator, exporter, and DB schema do not
+change.
 
 Postprocessing is one function — `filter_detections(...)`: global
 confidence floor, optional AOI centroid containment, sequential id
@@ -272,13 +224,9 @@ uv run alembic -c packages/core/src/core/alembic.ini upgrade head
 
 ## Local service ports
 
-| Service       | Port  |
-|---------------|-------|
-| API           | 30001 |
-| PostgreSQL    | 35432 |
-| Temporal      | 37233 |
-| Temporal UI   | 38080 |
-| Elasticsearch | 39200 |
+| Service    | Port  |
+|------------|-------|
+| PostgreSQL | 35432 |
 
 ## Caveats
 
@@ -287,8 +235,8 @@ uv run alembic -c packages/core/src/core/alembic.ini upgrade head
   `clock`, etc.) because the model was trained on a different distribution.
   For real use, swap in aerial-fine-tuned weights via `yolo_weights` or
   register a different detector via the factory.
-- The `quality_metrics` table and `/quality` endpoint are leftovers from
-  the previous design; nothing currently populates them.
+- The `quality_metrics` table is a leftover from the previous design;
+  nothing currently populates it.
 
 ## Documentation
 
