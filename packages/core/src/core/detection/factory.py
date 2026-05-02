@@ -178,13 +178,12 @@ def build_leaf(spec: DetectorSpec) -> Detector:
 def build_from_specs(specs: list[DetectorSpec]) -> Detector:
     """Build a Detector from a list of specs.
 
-    A single spec returns the leaf detector directly; multiple specs are
-    wrapped in a `CompositeDetector` that enforces each spec's class
-    allowlist and confidence override.
+    Always wraps in a `CompositeDetector` so per-spec class allowlists,
+    confidence overrides, and `source_model` provenance stamping are
+    enforced uniformly — single-spec jobs go through the same path as
+    multi-spec jobs.
     """
     if not specs:
         raise ValueError("build_from_specs requires at least one spec")
-    if len(specs) == 1 and specs[0].classes is None and specs[0].min_confidence is None:
-        return build_leaf(specs[0])
     pairs = [(build_leaf(spec), spec) for spec in specs]
     return CompositeDetector(pairs=pairs)

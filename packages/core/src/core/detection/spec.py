@@ -53,4 +53,37 @@ class DetectorSpec:
             )
         if not isinstance(raw, list):
             raise ValueError("'detectors' must be a list")
-        return [cls.from_dict(item) for item in raw]
+        specs = [cls.from_dict(item) for item in raw]
+        _validate_disjoint_classes(specs)
+        return specs
+
+
+def _validate_disjoint_classes(specs: list["DetectorSpec"]) -> None:
+    """Reject configs where two specs claim the same class.
+
+    There's no cross-model NMS, so overlapping allowlists silently
+    double-count. A spec with `classes=None` (accept-all) cannot be checked
+    for overlap, but combining accept-all with another spec is also a
+    likely mistake — flag it.
+    """
+    if len(specs) < 2:
+        return
+    accept_all = [s.name for s in specs if s.classes is None]
+    constrained = [s for s in specs if s.classes is not None]
+    if accept_all and constrained:
+        raise ValueError(
+            f"detectors {accept_all} accept all classes alongside "
+            f"constrained spec(s) {[s.name for s in constrained]}; "
+            "outputs would double-count. Set explicit `classes` on each."
+        )
+    seen: dict[str, str] = {}
+    for spec in constrained:
+        assert spec.classes is not None
+        for cls_name in spec.classes:
+            if cls_name in seen:
+                raise ValueError(
+                    f"class {cls_name!r} is claimed by both "
+                    f"{seen[cls_name]!r} and {spec.name!r}; "
+                    "use disjoint allowlists per spec."
+                )
+            seen[cls_name] = spec.name

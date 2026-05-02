@@ -187,14 +187,15 @@ class DetectorSpec:
     kwargs: dict[str, Any] = field(default_factory=dict)
 ```
 
-`build_from_specs(specs)` returns a single leaf detector when one spec is
-provided, or wraps multiple specs in a `CompositeDetector` that:
+`build_from_specs(specs)` always wraps the leaves in a `CompositeDetector`
+(single- and multi-spec jobs go through the same path), which:
 
 1. Runs each child against the same raster.
 2. Drops detections whose `class_name` isn't in the spec's allowlist.
 3. Drops detections below the spec's `min_confidence`.
 4. Stamps each detection with `source_model = child.name`.
-5. Concatenates all surviving detections and renumbers ids 0..N.
+5. Concatenates all surviving detections (final id renumbering happens
+   in `filter_detections` after the global confidence + AOI filters).
 
 Built-in detectors:
 

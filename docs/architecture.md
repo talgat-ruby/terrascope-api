@@ -87,9 +87,10 @@ preset. Adding a detector = one entry plus a class implementing the
 | `beit-ade`                 | `microsoft/beit-large-finetuned-ade-640-640`           |
 | `aerial-road-segmenter`    | user-supplied HF checkpoint trained on nadir roads     |
 
-`build_from_specs(specs)`:
-- 1 spec, no class/conf overrides → returns the leaf detector directly.
-- otherwise → wraps leaves in a `CompositeDetector(pairs=[(leaf, spec), …])`.
+`build_from_specs(specs)` always wraps leaves in a
+`CompositeDetector(pairs=[(leaf, spec), …])`. Single-spec jobs go through
+the same path as multi-spec jobs, so per-spec filtering and `source_model`
+stamping are enforced in exactly one place.
 
 ### CompositeDetector
 
@@ -126,9 +127,13 @@ Two stages, both intentionally minimal:
 1. **CompositeDetector**: per-spec class allowlist + per-spec confidence
    floor + provenance stamping.
 2. **`filter_detections()`**: global confidence floor (`min_confidence`,
-   default 0.25) + AOI centroid containment (when an AOI is provided) +
-   sequential id renumber 0..N. SAHI handles slice merging during
-   inference, so no separate NMS step.
+   default 0.25) — applied as a *default*, not a hard floor: when the
+   `specs` list is supplied, detections whose `source_model` matches a
+   spec with an explicit `min_confidence` skip the global check (the
+   per-spec value already filtered them in `CompositeDetector`). Then
+   AOI centroid containment (when an AOI is provided) + sequential id
+   renumber 0..N. SAHI handles slice merging during inference, so no
+   separate NMS step.
 
 ## Temporal workflow
 
@@ -139,7 +144,7 @@ the rest), 10-minute timeouts (30 min for `detect`):
 | # | Activity            | Reads from checkpoint | Writes to checkpoint                          |
 |---|---------------------|-----------------------|-----------------------------------------------|
 | 1 | `load_imagery`      | —                     | `load`: `clipped_path`, `transform`, `crs`, `aoi_wkt` |
-| 2 | `detect`            | `load`                | `detect`: `detector`, `detectors`, `detection_count`, `overlay_path`; persists rows to `detections` |
+| 2 | `detect`            | `load`                | `detect`: `detectors`, `detection_count`, `overlay_path`; persists rows to `detections` |
 | 3 | `export_results`    | `detect` (DB rows)    | `export`: `geojson_path`                      |
 | 4 | `compute_indicators`| `detect` + AOI        | `indicators`: paths to CSV/JSON               |
 | 5 | `finalize_job`      | —                     | sets `status=COMPLETED`, `completed_at`       |
@@ -199,8 +204,9 @@ which is meaningless on lon/lat.
 
 ## Adding a new detector
 
-1. Implement a class with `name: str` and `detect(raster) -> list[Detection]`
-   stamping `source_model=self.name` on each emission.
+1. Implement a class with `name: str` and `detect(raster) -> list[Detection]`.
+   `CompositeDetector` re-stamps `source_model=self.name` for each emission,
+   so leaves don't need to set it (but may, for clarity).
 2. Add a builder function and a `_BUILDERS["my-key"] = _build_my`
    registration in `factory.py`.
 3. Submit jobs with `{"detectors": [{"name": "my-key", "classes": [...]}]}`.
@@ -217,4 +223,6 @@ No changes to workflow, worker, exporter, schema, or DB.
   `kwargs.min_pixels` (lower to keep small CCs).
 - `quality_metrics` table is unused.
 - No cross-model NMS; overlapping detections from different models are
-  both kept. Use disjoint `classes` allowlists per spec to avoid this.
+  both kept. `DetectorSpec.list_from_config` enforces disjoint `classes`
+  allowlists across specs at submission time, and rejects mixing
+  accept-all (`classes=None`) with constrained specs in the same job.

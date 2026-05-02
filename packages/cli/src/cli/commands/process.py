@@ -74,10 +74,14 @@ def _run_local(
     specs = DetectorSpec.list_from_config({"detectors": detector_specs})
     det = build_from_specs(specs)
     detections = det.detect(raster)
-    typer.echo(f"  Raw detections: {len(detections)} via {det.name}")
+    names = ", ".join(s.name for s in specs)
+    typer.echo(f"  Raw detections: {len(detections)} via [{names}]")
 
     detections = filter_detections(
-        detections, min_confidence=settings.min_confidence, aoi=raster.aoi_geom
+        detections,
+        min_confidence=settings.min_confidence,
+        aoi=raster.aoi_geom,
+        specs=specs,
     )
     typer.echo(f"  After filter: {len(detections)}")
 

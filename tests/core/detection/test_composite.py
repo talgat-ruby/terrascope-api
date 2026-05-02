@@ -51,14 +51,14 @@ def test_composite_concatenates_children():
     assert {d.class_name for d in out} == {"car", "ship", "building", "grass"}
 
 
-def test_composite_renumbers_ids_globally():
+def test_composite_preserves_child_order():
     a = _Stub([_det(0, "car", "a"), _det(1, "ship", "a")], name="a")
     b = _Stub([_det(0, "building", "b")], name="b")
     composite = CompositeDetector(
         pairs=[(a, DetectorSpec(name="a")), (b, DetectorSpec(name="b"))]
     )
     out = composite.detect(_raster())
-    assert [d.id for d in out] == [0, 1, 2]
+    assert [d.class_name for d in out] == ["car", "ship", "building"]
 
 
 def test_composite_class_allowlist():

@@ -3,7 +3,7 @@ allowlists and confidence thresholds, then merge their output.
 
 Each child runs independently against the same Raster. Outputs are filtered
 to the spec's class allowlist and confidence floor, stamped with provenance,
-and concatenated with sequential ids.
+and concatenated. Canonical id renumbering is owned by `filter_detections`.
 """
 
 from __future__ import annotations
@@ -37,4 +37,4 @@ class CompositeDetector:
                 if det.source_model != child.name:
                     det = replace(det, source_model=child.name)
                 merged.append(det)
-        return [replace(d, id=i) for i, d in enumerate(merged)]
+        return merged

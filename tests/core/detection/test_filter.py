@@ -1,6 +1,7 @@
 from shapely.geometry import box
 
 from core.detection import filter_detections
+from core.detection.spec import DetectorSpec
 from core.detection.types import Detection
 
 
@@ -9,6 +10,7 @@ def _det(
     confidence: float = 0.8,
     bounds: tuple[float, float, float, float] = (0.1, 0.1, 0.2, 0.2),
     class_name: str = "car",
+    source_model: str = "stub",
 ) -> Detection:
     return Detection(
         id=id,
@@ -17,7 +19,7 @@ def _det(
         bbox=bounds,
         pixel_bbox=(0, 0, 10, 10),
         centroid=box(*bounds).centroid,
-        source_model="stub",
+        source_model=source_model,
     )
 
 
@@ -57,3 +59,42 @@ def test_renumbers_ids():
 
 def test_empty_input():
     assert filter_detections([], min_confidence=0.5) == []
+
+
+def test_per_spec_min_confidence_overrides_global_default():
+    permissive_spec = DetectorSpec(name="seg", min_confidence=0.1)
+    out = filter_detections(
+        [_det(confidence=0.15, class_name="building", source_model="seg")],
+        min_confidence=0.25,
+        specs=[permissive_spec],
+    )
+    assert len(out) == 1
+
+
+def test_global_default_still_applies_when_spec_has_no_explicit_threshold():
+    spec = DetectorSpec(name="seg")  # no min_confidence
+    out = filter_detections(
+        [_det(confidence=0.15, class_name="building", source_model="seg")],
+        min_confidence=0.25,
+        specs=[spec],
+    )
+    assert out == []
+
+
+def test_specs_match_by_source_model():
+    spec_seg = DetectorSpec(name="seg", min_confidence=0.1)
+    spec_yolo = DetectorSpec(name="yolo")  # default applies
+    seg_det = Detection(
+        id=0, class_name="building", confidence=0.15,
+        bbox=(0.1, 0.1, 0.2, 0.2), pixel_bbox=(0, 0, 10, 10),
+        centroid=box(0.1, 0.1, 0.2, 0.2).centroid, source_model="seg",
+    )
+    yolo_det = Detection(
+        id=1, class_name="car", confidence=0.15,
+        bbox=(0.3, 0.3, 0.4, 0.4), pixel_bbox=(0, 0, 10, 10),
+        centroid=box(0.3, 0.3, 0.4, 0.4).centroid, source_model="yolo",
+    )
+    out = filter_detections(
+        [seg_det, yolo_det], min_confidence=0.25, specs=[spec_seg, spec_yolo]
+    )
+    assert [d.class_name for d in out] == ["building"]

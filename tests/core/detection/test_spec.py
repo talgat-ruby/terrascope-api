@@ -55,10 +55,39 @@ def test_list_from_config_parses_multiple():
         {
             "detectors": [
                 {"name": "a", "classes": ["x"]},
-                {"name": "b", "min_confidence": 0.3},
+                {"name": "b", "classes": ["y"], "min_confidence": 0.3},
             ]
         }
     )
     assert [s.name for s in specs] == ["a", "b"]
     assert specs[0].classes == ("x",)
     assert specs[1].min_confidence == 0.3
+
+
+def test_list_from_config_single_accept_all_ok():
+    specs = DetectorSpec.list_from_config({"detectors": [{"name": "a"}]})
+    assert specs[0].classes is None
+
+
+def test_list_from_config_rejects_overlapping_classes():
+    with pytest.raises(ValueError, match="claimed by both"):
+        DetectorSpec.list_from_config(
+            {
+                "detectors": [
+                    {"name": "a", "classes": ["car", "ship"]},
+                    {"name": "b", "classes": ["ship", "plane"]},
+                ]
+            }
+        )
+
+
+def test_list_from_config_rejects_accept_all_with_constrained():
+    with pytest.raises(ValueError, match="accept all"):
+        DetectorSpec.list_from_config(
+            {
+                "detectors": [
+                    {"name": "a"},
+                    {"name": "b", "classes": ["car"]},
+                ]
+            }
+        )

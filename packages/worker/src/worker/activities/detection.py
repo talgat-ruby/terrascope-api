@@ -54,7 +54,10 @@ async def detect(job_id: str) -> dict:
 
             detections = await asyncio.to_thread(detector.detect, raster)
             detections = filter_detections(
-                detections, min_confidence=min_confidence, aoi=aoi_geom
+                detections,
+                min_confidence=min_confidence,
+                aoi=aoi_geom,
+                specs=specs,
             )
 
             # Persist with the sequential ids assigned by filter_detections.
@@ -79,7 +82,6 @@ async def detect(job_id: str) -> dict:
                 current_step="detect",
                 checkpoint_update={
                     "detect": {
-                        "detector": detector.name,
                         "detectors": [s.name for s in specs],
                         "detection_count": len(detections),
                         "overlay_path": str(overlay_path),
@@ -87,8 +89,9 @@ async def detect(job_id: str) -> dict:
                 },
             )
 
+            names = ", ".join(s.name for s in specs)
             activity.logger.info(
-                f"Detection done for job {job_id}: {len(detections)} via {detector.name}"
+                f"Detection done for job {job_id}: {len(detections)} via [{names}]"
             )
             return {
                 "status": "detected",
