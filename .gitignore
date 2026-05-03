@@ -21,6 +21,9 @@ _tmp_patch.png
 *.DS_Store
 *.aux.xml
 
+# Кэш OSM-масок (генерируется при запуске run_roads_ml.py)
+road_ml_data/
+
 # Результаты (генерируются при запуске)
 results/
 *.png

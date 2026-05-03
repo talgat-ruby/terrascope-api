@@ -11,3 +11,5 @@ matplotlib==3.9.4
 opencv-python-headless==4.13.0.92
 albumentations==2.0.8
 osmnx>=2.0.0
+pyproj>=3.6.0
+segmentation-models-pytorch>=0.3.3

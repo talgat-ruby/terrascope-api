@@ -31,7 +31,7 @@ import segmentation_models_pytorch as smp
 #  НАСТРОЙКИ
 # ─────────────────────────────────────────
 
-INFER_TILE   = 'Dataset/Almaty/Almaty_3.tif'   # тайл для инференса
+INFER_TILE   = 'Dataset/Astana/Astana_4.tif'   # тайл для инференса
 CROP_SIZE    = 4000    # пикс, центральный кроп из каждого тайла
 PATCH_SIZE   = 512     # размер патча для обучения
 STRIDE       = 256     # шаг при нарезке патчей
