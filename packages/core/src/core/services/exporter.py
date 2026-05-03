@@ -30,7 +30,7 @@ class GISExporterService:
                 "id": d.id,
                 "class_name": d.class_name,
                 "confidence": d.confidence,
-                "geometry": box(*d.bbox),
+                "geometry": d.geometry if d.geometry is not None else box(*d.bbox),
                 "centroid_wkt": d.centroid.wkt,
             }
             for d in detections

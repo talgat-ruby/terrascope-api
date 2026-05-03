@@ -18,6 +18,8 @@ dev = [
     "alembic>=1.15",
     "terrascope-core",
     "terrascope-cli",
+    "terrascope-core2",
+    "terrascope-cli2",
     "python-dotenv>=1.2.2",
     "greenlet>=3.0.3",
 ]
@@ -25,11 +27,13 @@ dev = [
 [tool.uv.sources]
 terrascope-core = { workspace = true }
 terrascope-cli = { workspace = true }
+terrascope-core2 = { workspace = true }
+terrascope-cli2 = { workspace = true }
 
 [tool.pyright]
 venvPath = "."
 venv = ".venv"
-extraPaths = ["packages/core/src"]
+extraPaths = ["packages/core/src", "packages/core2/src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

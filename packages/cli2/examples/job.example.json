@@ -1,0 +1,44 @@
+{
+  "_comment": "Sample terrascope2 job. Paths are resolved relative to this file. Run with: uv run terrascope2 --config packages/cli2/examples/job.example.json",
+  "input": "../../../inputs/Astana_4.tif",
+  "aoi": null,
+  "output": "../../../outputs/Astana4_2",
+  "processes": [
+    {
+      "name": "msft-buildings",
+      "kwargs": {
+        "country": "Kazakhstan",
+        "min_area_m2": 20
+      }
+    },
+    {
+      "_comment": "Default to Ultralytics' yolov26n.pt (COCO) — downloads automatically. The keremberke HF repo is currently gated; if you have access, swap `weights` to that repo id and the loader will cache it under ./tmp/weights.",
+      "name": "yolo26-obb",
+      "classes": [
+        "large vehicle",
+        "small vehicle",
+        "tennis court",
+        "bridge",
+        "roundabout",
+        "soccer ball field",
+        "swimming pool"
+      ]
+    },
+    {
+      "name": "sam-rs-roads",
+      "classes": [
+        "road"
+      ],
+      "kwargs": {
+        "weights": "sam_vit_h_4b8939.pth",
+        "model_type": "vit_h",
+        "device": "cpu",
+        "points_per_side": 32,
+        "min_area_px": 800,
+        "max_area_frac": 0.5,
+        "min_elongation": 4.0,
+        "min_long_side_px": 80
+      }
+    }
+  ]
+}

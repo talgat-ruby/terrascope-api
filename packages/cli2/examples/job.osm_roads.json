@@ -1,0 +1,24 @@
+{
+  "_comment": "OSM road network for the raster's AOI. Requires internet access on first run; responses are cached under ~/.cache/terrascope/osm_roads. No ML inference — vector data from OpenStreetMap, confidence=1.0. Run with: uv run terrascope2 --config packages/cli2/examples/job.osm_roads.json",
+  "input": "../../../inputs/Astana_3.tif",
+  "aoi": null,
+  "output": "../../../outputs/Astana3_osm",
+  "processes": [
+    {
+      "name": "osm-roads",
+      "_comment_classes": "Filter by broad class. Omit 'classes' to emit all three: major_road, road, local_road.",
+      "classes": [
+        "major_road",
+        "road",
+        "local_road"
+      ],
+      "kwargs": {
+        "_comment_url": "kumi.systems is often faster than the primary overpass-api.de instance.",
+        "overpass_url": "https://overpass.kumi.systems/api/interpreter",
+        "_comment_timeout": "server_timeout goes into [timeout:N] in the QL; HTTP socket timeout must be larger.",
+        "server_timeout": 180,
+        "timeout": 220
+      }
+    }
+  ]
+}

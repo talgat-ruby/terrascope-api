@@ -1,0 +1,32 @@
+{
+  "_comment": "Demonstrates SAM-RS with oriented bounding boxes. Each detection's `geometry` is the minimum rotated rectangle of the underlying SAM mask — diagonal roads render as tilted parallelograms hugging the road instead of fat axis-aligned rectangles. The renderer (cli2) reads `geometry` over `pixel_bbox` automatically. Uses vit_b for fast iteration; switch to vit_h for quality.",
+  "input": "../../../inputs/Astana_6.tif",
+  "aoi": null,
+  "output": "../../../outputs/Astana6_sam_obb",
+  "processes": [
+    {
+      "name": "sam-rs",
+      "classes": [
+        "road",
+        "building"
+      ],
+      "kwargs": {
+        "model_type": "vit_b",
+        "device": "cpu",
+        "max_long_side_px": 2048,
+        "points_per_side": 24,
+        "points_per_batch": 64,
+        "pred_iou_thresh": 0.8,
+        "stability_score_thresh": 0.88,
+        "class_rules": {
+          "road": {
+            "min_elongation": 4.0,
+            "min_long_side_px": 80,
+            "min_area_px": 800,
+            "max_area_frac": 0.5
+          }
+        }
+      }
+    }
+  ]
+}

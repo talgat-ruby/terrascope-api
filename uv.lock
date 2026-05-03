@@ -13,7 +13,9 @@ resolution-markers = [
 members = [
     "terrascope",
     "terrascope-cli",
+    "terrascope-cli2",
     "terrascope-core",
+    "terrascope-core2",
 ]
 
 [[package]]
@@ -1582,6 +1584,15 @@ wheels = [
 ]
 
 [[package]]
+name = "segment-anything"
+version = "1.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/4f/88/7725f418f2bb4a7ac2e5e8295fbbca2900c70c8fe5ba48b3aff5788af9a2/segment_anything-1.0.tar.gz", hash = "sha256:ed0c9f6fb07bbef9c6238a7028a13c8272f1ba6b6305ca73e3e064266503736b", size = 31191, upload-time = "2023-04-06T18:04:40.816Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/75/77/8e0c16abf151a1dd076b562febc0da2ecf1132b0b41826087af96f101f42/segment_anything-1.0-py3-none-any.whl", hash = "sha256:86f67d417a915823c3302098effe9008b688945772517310956bb49de0e7f02e", size = 36560, upload-time = "2023-04-06T18:04:38.834Z" },
+]
+
+[[package]]
 name = "setuptools"
 version = "81.0.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1739,7 +1750,9 @@ dev = [
     { name = "pytest-cov" },
     { name = "python-dotenv" },
     { name = "terrascope-cli" },
+    { name = "terrascope-cli2" },
     { name = "terrascope-core" },
+    { name = "terrascope-core2" },
 ]
 
 [package.metadata]
@@ -1754,7 +1767,9 @@ dev = [
     { name = "pytest-cov", specifier = ">=6.1" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
     { name = "terrascope-cli", editable = "packages/cli" },
+    { name = "terrascope-cli2", editable = "packages/cli2" },
     { name = "terrascope-core", editable = "packages/core" },
+    { name = "terrascope-core2", editable = "packages/core2" },
 ]
 
 [[package]]
@@ -1772,6 +1787,25 @@ requires-dist = [
     { name = "temporalio", specifier = ">=1.9" },
     { name = "terrascope-core", editable = "packages/core" },
     { name = "typer", extras = ["all"], specifier = ">=0.15" },
+]
+
+[[package]]
+name = "terrascope-cli2"
+version = "0.1.0"
+source = { editable = "packages/cli2" }
+dependencies = [
+    { name = "shapely" },
+    { name = "terrascope-core" },
+    { name = "terrascope-core2" },
+    { name = "typer" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "shapely", specifier = ">=2.0" },
+    { name = "terrascope-core", editable = "packages/core" },
+    { name = "terrascope-core2", editable = "packages/core2" },
+    { name = "typer", specifier = ">=0.12" },
 ]
 
 [[package]]
@@ -1817,6 +1851,37 @@ requires-dist = [
     { name = "torchvision", specifier = ">=0.21" },
     { name = "transformers", specifier = ">=4.40" },
     { name = "ultralytics", specifier = ">=8.3" },
+]
+
+[[package]]
+name = "terrascope-core2"
+version = "0.1.0"
+source = { editable = "packages/core2" }
+dependencies = [
+    { name = "huggingface-hub" },
+    { name = "numpy" },
+    { name = "pillow" },
+    { name = "pyproj" },
+    { name = "rasterio" },
+    { name = "segment-anything" },
+    { name = "shapely" },
+    { name = "terrascope-core" },
+    { name = "torch" },
+    { name = "transformers" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "huggingface-hub", specifier = ">=0.23" },
+    { name = "numpy", specifier = ">=1.26" },
+    { name = "pillow", specifier = ">=10.0" },
+    { name = "pyproj", specifier = ">=3.6" },
+    { name = "rasterio", specifier = ">=1.3" },
+    { name = "segment-anything", specifier = ">=1.0" },
+    { name = "shapely", specifier = ">=2.0" },
+    { name = "terrascope-core", editable = "packages/core" },
+    { name = "torch", specifier = ">=2.2" },
+    { name = "transformers", specifier = ">=4.41" },
 ]
 
 [[package]]

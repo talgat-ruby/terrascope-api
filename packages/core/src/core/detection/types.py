@@ -50,6 +50,9 @@ class Detection:
     grid — kept so the renderer can draw without re-projecting.
     `id` is assigned sequentially after filtering (0..N).
     `source_model` records which detector emitted the detection.
+    `geometry` is an optional precise shape (LineString, Polygon, …) in the
+    same CRS as `bbox`. When present, renderers/exporters should prefer it
+    over `bbox` since the bbox is only the axis-aligned envelope.
     """
 
     id: int
@@ -59,6 +62,7 @@ class Detection:
     pixel_bbox: tuple[int, int, int, int]
     centroid: Point
     source_model: str
+    geometry: BaseGeometry | None = None
 
 
 class Detector(Protocol):
