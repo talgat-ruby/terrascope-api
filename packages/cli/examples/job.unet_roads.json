@@ -1,0 +1,24 @@
+{
+  "_comment": "U-Net road segmentation. Uses the bundled road_unet.pth checkpoint at the repo root (resnet34 encoder, trained on OSM-derived labels at ~0.054 m/px Astana tiles). Sliding-window inference at 512px patches, vectorised to road polygons. Run with: uv run terrascope --config packages/cli/examples/job.unet_roads.json",
+  "input": "../../../inputs/Astana_7.tif",
+  "aoi": null,
+  "output": "../../../outputs/Astana7_unet_roads",
+  "processes": [
+    {
+      "name": "unet-roads",
+      "classes": [
+        "road"
+      ],
+      "kwargs": {
+        "_comment_device": "Auto-selects mps/cuda/cpu when omitted. Force a specific backend here.",
+        "device": "cpu",
+        "_comment_threshold": "Sigmoid cutoff. Lower → more roads, more false positives.",
+        "road_threshold": 0.4,
+        "patch_size": 512,
+        "_comment_min_area": "Drops speckle blobs smaller than this many pixels.",
+        "min_area_px": 200,
+        "simplify_px": 1.0
+      }
+    }
+  ]
+}
