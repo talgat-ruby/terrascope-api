@@ -1,0 +1,40 @@
+{
+  "_comment": "Full-stack job: buildings (Microsoft footprints) + vehicles (YOLO26-OBB) + roads (U-Net). Each process emits a disjoint class set so cross-process double-counting is impossible. Run with: uv run terrascope --config packages/cli/examples/job.full_stack.json",
+  "input": "../../../inputs/Almaty_1.tif",
+  "aoi": null,
+  "output": "../../../outputs/Almaty1_full_stack",
+  "processes": [
+    {
+      "_comment": "Vector building footprints from Microsoft Global Buildings. No model inference — fetches the pre-extracted shards covering the AOI from Azure CDN, clips to the raster footprint, drops anything under 20 m² (geodesic).",
+      "name": "msft-buildings",
+      "classes": ["building"],
+      "kwargs": {
+        "country": "Kazakhstan",
+        "min_area_m2": 20
+      }
+    },
+    {
+      "_comment": "YOLO26 OBB on DOTA v2 classes. Restricted to the four DOTA vehicle/aircraft labels so the output stays focused. Min confidence 0.25 trims weak boxes; SAHI handles tiling automatically when the long side > 1024px.",
+      "name": "yolo26-obb",
+      "classes": [
+        "large vehicle",
+        "small vehicle",
+        "plane",
+        "ship"
+      ],
+      "min_confidence": 0.25
+    },
+    {
+      "_comment": "U-Net road segmentation. Uses the bundled road_unet.pth checkpoint (resnet34, trained at ~0.054 m/px). Sliding 512-px patches with sigmoid cutoff 0.4; min_area_px=200 kills speckle.",
+      "name": "unet-roads",
+      "classes": ["road"],
+      "kwargs": {
+        "device": "cpu",
+        "patch_size": 512,
+        "road_threshold": 0.4,
+        "min_area_px": 200,
+        "simplify_px": 1.0
+      }
+    }
+  ]
+}

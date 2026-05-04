@@ -268,5 +268,139 @@ def _run(job: JobConfig) -> None:
     typer.echo("Done.")
 
 
+@app.command("eval")
+def eval_cmd(
+    pred: Path = typer.Option(
+        ..., "--pred", "-p", help="Predictions GeoJSON (exporter output)."
+    ),
+    truth: Path = typer.Option(
+        ..., "--truth", "-t", help="Ground-truth GeoJSON (must be EPSG:4326)."
+    ),
+    output: Path = typer.Option(
+        Path("./eval"), "--output", "-o", help="Directory for metrics.json / .csv."
+    ),
+    iou: float = typer.Option(0.5, "--iou", help="IoU threshold for TP match."),
+    kind: str = typer.Option(
+        "polygon", "--kind", help="IoU kind: 'polygon' or 'line' (buffered)."
+    ),
+    line_buffer_m: float = typer.Option(
+        5.0, "--line-buffer-m", help="Buffer (m) for line-IoU; ignored for polygon."
+    ),
+    classes: str | None = typer.Option(
+        None,
+        "--classes",
+        help="Comma-separated class allowlist (post-remap). Default: all.",
+    ),
+    truth_class_field: str = typer.Option(
+        "class", "--truth-class-field", help="Property name holding class on truth."
+    ),
+    truth_remap: str | None = typer.Option(
+        None,
+        "--truth-remap",
+        help='JSON dict remapping truth labels to prediction labels, e.g. \'{"car":"small vehicle"}\'.',
+    ),
+) -> None:
+    """Score predictions GeoJSON against a ground-truth GeoJSON (§7).
+
+    Both inputs must be in EPSG:4326. The predictions file is expected to
+    follow the exporter schema (`class`, `confidence` in 0–100). Truth files
+    only need `class`; missing confidence is treated as 1.0.
+    """
+    from core import evaluate, load_features
+
+    class_filter: set[str] | None = None
+    if classes:
+        class_filter = {c.strip() for c in classes.split(",") if c.strip()}
+
+    remap: dict[str, str] | None = None
+    if truth_remap:
+        parsed = _parse_json_str(truth_remap, "--truth-remap")
+        if not isinstance(parsed, dict):
+            raise _fail("--truth-remap must be a JSON object.")
+        remap = {str(k): str(v) for k, v in parsed.items()}
+
+    if not pred.exists():
+        raise _fail(f"predictions file not found: {pred}")
+    if not truth.exists():
+        raise _fail(f"truth file not found: {truth}")
+
+    pred_records = load_features(pred, class_filter=class_filter)
+    truth_records = load_features(
+        truth,
+        class_field=truth_class_field,
+        class_filter=class_filter,
+        class_remap=remap,
+    )
+
+    preds_by_class: dict[str, list[tuple[object, float]]] = {}
+    for cname, geom, conf in pred_records:
+        preds_by_class.setdefault(cname, []).append((geom, conf))
+    truths_by_class: dict[str, list[object]] = {}
+    for cname, geom, _ in truth_records:
+        truths_by_class.setdefault(cname, []).append(geom)
+
+    report = evaluate(
+        preds_by_class,  # type: ignore[arg-type]
+        truths_by_class,  # type: ignore[arg-type]
+        iou_threshold=iou,
+        iou_kind=kind,
+        line_buffer_m=line_buffer_m,
+    )
+
+    output.mkdir(parents=True, exist_ok=True)
+    json_path = output / "metrics.json"
+    json_path.write_text(json.dumps(report.to_dict(), indent=2))
+
+    csv_path = output / "metrics.csv"
+    import csv as _csv
+
+    with csv_path.open("w", newline="") as f:
+        w = _csv.writer(f)
+        w.writerow(
+            [
+                "class",
+                "iou_threshold",
+                "n_pred",
+                "n_truth",
+                "tp",
+                "fp",
+                "fn",
+                "precision",
+                "recall",
+                "f1",
+                "average_precision",
+            ]
+        )
+        for c in report.by_class:
+            w.writerow(
+                [
+                    c.class_name,
+                    c.iou_threshold,
+                    c.n_pred,
+                    c.n_truth,
+                    c.tp,
+                    c.fp,
+                    c.fn,
+                    f"{c.precision:.4f}",
+                    f"{c.recall:.4f}",
+                    f"{c.f1:.4f}",
+                    f"{c.average_precision:.4f}",
+                ]
+            )
+
+    typer.echo(f"Wrote {json_path} and {csv_path}")
+    typer.echo(
+        f"micro P/R/F1: {report.micro_precision:.3f} / "
+        f"{report.micro_recall:.3f} / {report.micro_f1:.3f}  |  "
+        f"mAP@{iou}: {report.mean_average_precision:.3f}"
+    )
+    for c in report.by_class:
+        typer.echo(
+            f"  {c.class_name:<20s} P={c.precision:.3f} R={c.recall:.3f} "
+            f"F1={c.f1:.3f} AP={c.average_precision:.3f} "
+            f"(TP={c.tp} FP={c.fp} FN={c.fn})"
+        )
+
+
 if __name__ == "__main__":
     app()

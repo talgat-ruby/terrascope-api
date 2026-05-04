@@ -17,6 +17,8 @@ dependencies = [
     "pillow>=10.0",
     "scipy>=1.11",
     "rtree>=1.2",
+    "sahi>=0.11",
+    "ultralytics>=8.3",
 ]
 
 [build-system]

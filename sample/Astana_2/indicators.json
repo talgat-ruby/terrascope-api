@@ -1,0 +1,54 @@
+{
+  "zone_area_m2": 342024.72,
+  "total_detections": 513,
+  "by_class": [
+    {
+      "class": "building",
+      "count": 198,
+      "total_area_m2": 59380.174,
+      "total_length_m": 0.0,
+      "density_per_km2": 578.9055,
+      "area_fraction": 0.173614
+    },
+    {
+      "class": "large vehicle",
+      "count": 8,
+      "total_area_m2": 245.646,
+      "total_length_m": 0.0,
+      "density_per_km2": 23.3901,
+      "area_fraction": 0.000718
+    },
+    {
+      "class": "plane",
+      "count": 1,
+      "total_area_m2": 30.142,
+      "total_length_m": 0.0,
+      "density_per_km2": 2.9238,
+      "area_fraction": 8.8e-05
+    },
+    {
+      "class": "road",
+      "count": 270,
+      "total_area_m2": 61673.262,
+      "total_length_m": 0.0,
+      "density_per_km2": 789.4166,
+      "area_fraction": 0.180318
+    },
+    {
+      "class": "ship",
+      "count": 6,
+      "total_area_m2": 128.446,
+      "total_length_m": 0.0,
+      "density_per_km2": 17.5426,
+      "area_fraction": 0.000376
+    },
+    {
+      "class": "small vehicle",
+      "count": 30,
+      "total_area_m2": 580.43,
+      "total_length_m": 0.0,
+      "density_per_km2": 87.713,
+      "area_fraction": 0.001697
+    }
+  ]
+}

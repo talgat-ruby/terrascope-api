@@ -1,0 +1,9 @@
+Loading imagery from /Users/talgat/Workplace/py/terrascope-api/inputs/Astana_3.tif...
+  Shape: (8363, 12737, 3), CRS: EPSG:4326
+Running 3 process(es): ['msft-buildings', 'yolo26-obb', 'unet-roads']
+Performing prediction on 425 slices.
+  Merged detections: 542
+  PNG overlay: sample/Astana_3/overlay.png
+  GeoJSON (EPSG:4326): sample/Astana_3/detections.geojson
+  Indicators:  sample/Astana_3/indicators.json, sample/Astana_3/indicators.csv
+Done.

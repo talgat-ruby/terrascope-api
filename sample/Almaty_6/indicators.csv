@@ -1,0 +1,6 @@
+class,count,total_area_m2,total_length_m,density_per_km2,area_fraction
+building,144,75319.48,0.0,299.0873,0.156438
+large vehicle,1,42.525,0.0,2.077,8.8e-05
+road,376,38266.434,0.0,780.9503,0.079479
+ship,23,726.963,0.0,47.7709,0.00151
+small vehicle,26,417.664,0.0,54.0019,0.000867

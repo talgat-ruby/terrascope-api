@@ -1,0 +1,9 @@
+Loading imagery from /Users/talgat/Workplace/py/terrascope-api/inputs/Almaty_5.tif...
+  Shape: (5532, 9521, 3), CRS: EPSG:4326
+Running 3 process(es): ['msft-buildings', 'yolo26-obb', 'unet-roads']
+Performing prediction on 209 slices.
+  Merged detections: 755
+  PNG overlay: sample/Almaty_5/overlay.png
+  GeoJSON (EPSG:4326): sample/Almaty_5/detections.geojson
+  Indicators:  sample/Almaty_5/indicators.json, sample/Almaty_5/indicators.csv
+Done.

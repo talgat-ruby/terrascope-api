@@ -1,0 +1,44 @@
+{
+  "_comment": "Full-stack job for Almaty_9: buildings (Microsoft footprints) + vehicles (YOLO26-OBB) + roads (U-Net). Run with: uv run terrascope --config packages/cli/examples/job.full_stack.Almaty_9.json",
+  "input": "../../../inputs/Almaty_9.tif",
+  "aoi": null,
+  "output": "../../../outputs/Almaty_9_full_stack",
+  "processes": [
+    {
+      "_comment": "Vector building footprints from Microsoft Global Buildings.",
+      "name": "msft-buildings",
+      "classes": [
+        "building"
+      ],
+      "kwargs": {
+        "country": "Kazakhstan",
+        "min_area_m2": 20
+      }
+    },
+    {
+      "_comment": "YOLO26 OBB on DOTA v2 vehicle/aircraft classes.",
+      "name": "yolo26-obb",
+      "classes": [
+        "large vehicle",
+        "small vehicle",
+        "plane",
+        "ship"
+      ],
+      "min_confidence": 0.25
+    },
+    {
+      "_comment": "U-Net road segmentation.",
+      "name": "unet-roads",
+      "classes": [
+        "road"
+      ],
+      "kwargs": {
+        "device": "cpu",
+        "patch_size": 512,
+        "road_threshold": 0.4,
+        "min_area_px": 200,
+        "simplify_px": 1.0
+      }
+    }
+  ]
+}
