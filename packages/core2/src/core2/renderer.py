@@ -11,6 +11,8 @@ Pillow-only, pixel coordinates only — same surface as
 from __future__ import annotations
 
 import hashlib
+import math
+import warnings
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
@@ -95,10 +97,18 @@ def _draw_geometry(
         # Use the minimum rotated rectangle (oriented bbox) instead of
         # the raw polygon outline — gives a cleaner, parallelogram-like
         # quad that conveys orientation without raster-noise jitter.
-        obb = geom.minimum_rotated_rectangle
-        if not isinstance(obb, Polygon):
+        # GEOS' rotating calipers logs a RuntimeWarning on perfectly
+        # axis-aligned or collinear rings (common for polygons coming
+        # out of rasterio.features.shapes); suppress it — we filter
+        # NaN results below.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            obb = geom.minimum_rotated_rectangle
+        if not isinstance(obb, Polygon) or obb.is_empty:
             return  # degenerate (line/point) — nothing to fill
         ext = _project_to_pixels(list(obb.exterior.coords), raster)
+        if any(not math.isfinite(c) for pt in obb.exterior.coords for c in pt):
+            return  # NaN-laden OBB; skip rather than crash PIL
         if len(ext) >= 3:
             draw.polygon(
                 ext,
