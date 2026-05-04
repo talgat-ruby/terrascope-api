@@ -11,7 +11,7 @@ from core2.processes.registry import build, register, registered_names
 # Side-effect imports register built-in processes.
 from core2.processes import msft_footprints  # noqa: F401
 from core2.processes import osm_roads  # noqa: F401
-from core2.processes import sam_rs  # noqa: F401
+from core2.processes import sam_road  # noqa: F401
 from core2.processes import yolo_sahi  # noqa: F401
 
 __all__ = [

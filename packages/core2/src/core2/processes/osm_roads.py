@@ -46,6 +46,7 @@ import hashlib
 import json
 import logging
 import math
+import socket
 import time
 import urllib.error
 import urllib.parse
@@ -131,6 +132,10 @@ class OsmRoadsProcess:
     timeout: int = 220          # HTTP socket timeout; must exceed server_timeout
     tile_size_deg: float = 0.1  # split AOI into ≤ this-deg-per-side tiles
     max_retries: int = 3        # per-tile retries on transient 5xx / timeouts
+    # Latched true when a DNS / connection-refused error is seen on any
+    # tile. Subsequent tiles in the same run skip the network and serve
+    # only from cache. Reset at the start of every `_fetch_or_load`.
+    _offline: bool = field(default=False, init=False, repr=False)
 
     @classmethod
     def from_spec(cls, spec: ProcessSpec) -> "OsmRoadsProcess":
@@ -251,15 +256,42 @@ class OsmRoadsProcess:
             len(tiles), self.tile_size_deg,
         )
 
+        # Reset offline latch per run so a transient outage in a previous
+        # run() doesn't permanently disable the network for this one.
+        self._offline = False
+        cache_hits = 0
+        cache_misses = 0
+
         # Dedupe across tiles — adjacent tiles share boundary nodes/ways.
         merged: dict[tuple[str, int], dict[str, Any]] = {}
         for i, (s, w, n, e) in enumerate(tiles, start=1):
+            cache_path = self._tile_cache_path(s, w, n, e)
+            had_cache = cache_path.exists()
             elements = self._fetch_or_load_tile(s, w, n, e, i, len(tiles))
+            if had_cache or elements:
+                cache_hits += 1
+            else:
+                cache_misses += 1
             for el in elements:
                 key = (el.get("type", ""), int(el.get("id", 0)))
                 if key not in merged:
                     merged[key] = el
+
+        if self._offline:
+            _log.info(
+                "osm-roads: offline — served %d/%d tiles from cache, %d missing",
+                cache_hits, len(tiles), cache_misses,
+            )
         return list(merged.values())
+
+    def _tile_cache_path(
+        self, lat_min: float, lon_min: float, lat_max: float, lon_max: float,
+    ) -> Path:
+        bbox_str = f"{lat_min:.6f},{lon_min:.6f},{lat_max:.6f},{lon_max:.6f}"
+        cache_key = hashlib.md5(
+            f"{self.overpass_url}|{bbox_str}".encode()
+        ).hexdigest()
+        return self.cache_dir / f"{cache_key}.json"
 
     def _fetch_or_load_tile(
         self,
@@ -272,10 +304,7 @@ class OsmRoadsProcess:
     ) -> list[dict[str, Any]]:
         """Fetch (or read cache for) a single tile."""
         bbox_str = f"{lat_min:.6f},{lon_min:.6f},{lat_max:.6f},{lon_max:.6f}"
-        cache_key = hashlib.md5(
-            f"{self.overpass_url}|{bbox_str}".encode()
-        ).hexdigest()
-        cache_path = self.cache_dir / f"{cache_key}.json"
+        cache_path = self._tile_cache_path(lat_min, lon_min, lat_max, lon_max)
 
         if cache_path.exists():
             _log.info(
@@ -283,6 +312,16 @@ class OsmRoadsProcess:
                 tile_idx, tile_total, cache_path.name,
             )
             return json.loads(cache_path.read_text()).get("elements", [])
+
+        # Network already known unreachable for this run — skip the call,
+        # accept partial coverage. Logged at warning so the gap is visible
+        # without making every miss a separate alarm.
+        if self._offline:
+            _log.warning(
+                "osm-roads: [%d/%d] offline — cache miss for tile %s, skipping",
+                tile_idx, tile_total, bbox_str,
+            )
+            return []
 
         query = _OVERPASS_QUERY.format(
             s=lat_min,
@@ -324,6 +363,17 @@ class OsmRoadsProcess:
                 # 4xx (other than 429) is not worth retrying.
                 if isinstance(exc, urllib.error.HTTPError) and exc.code < 500 and exc.code != 429:
                     raise
+                # DNS / connection-refused: the network is unreachable.
+                # Latch offline mode and fall back to cache-only for the
+                # rest of the run instead of waiting through retries.
+                if _is_offline_error(exc):
+                    self._offline = True
+                    _log.warning(
+                        "osm-roads: [%d/%d] network unreachable (%s) — "
+                        "falling back to cache-only for the rest of this run",
+                        tile_idx, tile_total, exc,
+                    )
+                    return []
                 last_err = exc
                 if attempt < self.max_retries:
                     backoff = 2 ** (attempt - 1) * 5  # 5s, 10s, 20s, ...
@@ -334,6 +384,22 @@ class OsmRoadsProcess:
                     time.sleep(backoff)
         assert last_err is not None
         raise last_err
+
+
+def _is_offline_error(exc: BaseException) -> bool:
+    """True for errors that mean "the network is unreachable" (vs transient).
+
+    DNS failures and connection refusal are not going to recover within
+    a 35-second backoff window — there's no point retrying. 5xx, 429,
+    and generic timeouts are still treated as transient by the caller.
+    """
+    if isinstance(exc, (socket.gaierror, socket.herror, ConnectionRefusedError)):
+        return True
+    if isinstance(exc, urllib.error.URLError):
+        reason = getattr(exc, "reason", None)
+        if isinstance(reason, (socket.gaierror, socket.herror, ConnectionRefusedError)):
+            return True
+    return False
 
 
 # ---------------------------------------------------------------------------

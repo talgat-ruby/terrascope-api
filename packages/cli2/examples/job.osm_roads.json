@@ -1,8 +1,8 @@
 {
   "_comment": "OSM road network for the raster's AOI. Requires internet access on first run; responses are cached under ~/.cache/terrascope/osm_roads. No ML inference — vector data from OpenStreetMap, confidence=1.0. Run with: uv run terrascope2 --config packages/cli2/examples/job.osm_roads.json",
-  "input": "../../../inputs/Astana_3.tif",
+  "input": "../../../inputs/Astana_10.tif",
   "aoi": null,
-  "output": "../../../outputs/Astana3_osm",
+  "output": "../../../outputs/Astana10_osm",
   "processes": [
     {
       "name": "osm-roads",

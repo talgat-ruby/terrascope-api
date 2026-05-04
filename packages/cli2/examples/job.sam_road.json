@@ -1,0 +1,25 @@
+{
+  "_comment": "SAM-Road (htcr/sam_road, MIT) — road graph extraction. First run downloads SAM ViT-B (~375 MB) and the trained SAM-Road checkpoint from HuggingFace into ./tmp/weights. The cityscale checkpoint was trained on ~1 m/px aerial imagery; if your raster is higher-res, set source_gsd_m_per_px so it gets resampled. Lowered thresholds vs upstream defaults for higher recall on out-of-distribution imagery.",
+  "input": "../../../inputs/Astana_6.tif",
+  "aoi": null,
+  "output": "../../../outputs/Astana6_sam_road",
+  "processes": [
+    {
+      "name": "sam-road",
+      "classes": [
+        "road"
+      ],
+      "kwargs": {
+        "device": "cpu",
+        "_comment": "source_gsd_m_per_px is auto-detected from the raster transform; override only if the raster is mis-georeferenced.",
+        "model_gsd_m_per_px": 1.0,
+        "itsc_threshold": 0.15,
+        "road_threshold": 0.25,
+        "topo_threshold": 0.4,
+        "tile_size": 2048,
+        "tile_overlap": 256,
+        "min_edge_len_m": 5.0
+      }
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "_comment": "SAM-Road / SpaceNet variant — same model architecture as `sam-road`, but loads spacenet_vitb_256_e10.ckpt (trained at ~0.3 m/px DigitalGlobe imagery, closer to commercial satellite than Cityscale's 1 m/px aerial). PATCH_SIZE=256 and stricter TOPO_THRESHOLD=0.705 are baked into the preset.",
+  "input": "../../../inputs/Astana_6.tif",
+  "aoi": null,
+  "output": "../../../outputs/Astana6_sam_road_spacenet",
+  "processes": [
+    {
+      "name": "sam-road-spacenet",
+      "classes": [
+        "road"
+      ],
+      "kwargs": {
+        "device": "cpu"
+      }
+    }
+  ]
+}

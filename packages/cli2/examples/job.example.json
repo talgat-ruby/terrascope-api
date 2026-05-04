@@ -23,22 +23,6 @@
         "soccer ball field",
         "swimming pool"
       ]
-    },
-    {
-      "name": "sam-rs-roads",
-      "classes": [
-        "road"
-      ],
-      "kwargs": {
-        "weights": "sam_vit_h_4b8939.pth",
-        "model_type": "vit_h",
-        "device": "cpu",
-        "points_per_side": 32,
-        "min_area_px": 800,
-        "max_area_frac": 0.5,
-        "min_elongation": 4.0,
-        "min_long_side_px": 80
-      }
     }
   ]
 }

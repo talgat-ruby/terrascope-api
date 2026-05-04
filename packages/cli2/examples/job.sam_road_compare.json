@@ -1,0 +1,22 @@
+{
+  "_comment": "Run both SAM-Road variants on the same raster so detections can be diffed in the output GeoJSON. Distinct `class_name` kwargs keep the two layers separable.",
+  "input": "../../../inputs/Astana_6.tif",
+  "aoi": null,
+  "output": "../../../outputs/Astana6_sam_road_compare",
+  "processes": [
+    {
+      "name": "sam-road",
+      "kwargs": {
+        "device": "cpu",
+        "class_name": "road_cityscale"
+      }
+    },
+    {
+      "name": "sam-road-spacenet",
+      "kwargs": {
+        "device": "cpu",
+        "class_name": "road_spacenet"
+      }
+    }
+  ]
+}

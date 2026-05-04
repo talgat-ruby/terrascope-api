@@ -14,6 +14,8 @@ dependencies = [
     "torch>=2.2",
     "transformers>=4.41",
     "pillow>=10.0",
+    "scipy>=1.11",
+    "rtree>=1.2",
 ]
 
 [build-system]
