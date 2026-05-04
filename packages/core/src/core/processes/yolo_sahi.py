@@ -23,12 +23,11 @@ import numpy as np
 from PIL import Image
 from shapely.geometry import box
 
+from core.config import WEIGHTS_DIR
 from core.detection.types import Detection, Raster
 
 from core.processes.base import ProcessSpec
 from core.processes.registry import register
-
-_DEFAULT_WEIGHTS_CACHE = Path("./tmp/weights")
 
 
 @dataclass
@@ -41,7 +40,8 @@ class YoloSahiProcess:
                               repo id (`<user>/<repo>`). HF repos are
                               downloaded once into `weights_dir` and the
                               local .pt path is handed to Ultralytics.
-    - `weights_dir`          (str, default `./tmp/weights`) — local cache
+    - `weights_dir`          (str, default `$TERRASCOPE_WEIGHTS_DIR`,
+                              fallback `~/.cache/terrascope/weights`) — local cache
                               directory for HF-resolved checkpoints.
     - `weights_filename`     (str | None) — explicit filename inside the
                               HF repo (e.g. `best.pt`). When omitted, the
@@ -67,7 +67,7 @@ class YoloSahiProcess:
     full_image_threshold: int = 1024
     source_gsd_m_per_px: float | None = None
     model_gsd_m_per_px: float | None = None
-    weights_dir: Path = field(default_factory=lambda: _DEFAULT_WEIGHTS_CACHE)
+    weights_dir: Path = field(default_factory=lambda: WEIGHTS_DIR)
     weights_filename: str | None = None
     _model: Any = field(default=None, init=False, repr=False)
 
@@ -85,7 +85,7 @@ class YoloSahiProcess:
             source_gsd_m_per_px=_optional_float(kw.get("source_gsd_m_per_px")),
             model_gsd_m_per_px=_optional_float(kw.get("model_gsd_m_per_px")),
             weights_dir=Path(
-                kw.get("weights_dir", _DEFAULT_WEIGHTS_CACHE)
+                kw.get("weights_dir", WEIGHTS_DIR)
             ).expanduser(),
             weights_filename=kw.get("weights_filename"),
         )

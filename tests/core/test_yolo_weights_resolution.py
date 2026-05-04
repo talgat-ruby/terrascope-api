@@ -109,9 +109,15 @@ def test_hf_repo_with_no_pt_files_raises(tmp_path: Path):
             raise AssertionError("expected FileNotFoundError")
 
 
-def test_default_weights_dir_is_local_tmp():
+def test_default_weights_dir_is_under_cache():
+    """Default cache root is `$TERRASCOPE_CACHE_DIR/weights`, expanded.
+
+    Falls back to ``~/.cache/terrascope/weights``. We just assert the
+    directory ends in ``weights`` rather than pinning a user path.
+    """
     proc = YoloSahiProcess.from_spec(ProcessSpec(name="yolov8n-sahi"))
-    assert str(proc.weights_dir) == "tmp/weights"
+    assert proc.weights_dir.name == "weights"
+    assert proc.weights_dir.is_absolute()
 
 
 def test_looks_like_hf_repo_truthtable():

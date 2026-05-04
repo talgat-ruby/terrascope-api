@@ -15,29 +15,45 @@ from __future__ import annotations
 import csv
 import gzip
 import json
+import logging
 import math
-import os
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict, Field
 from pyproj import Geod
-from rasterio.transform import rowcol
-from rasterio.warp import transform_bounds
 from shapely.geometry import Point, box, shape
 from shapely.geometry.base import BaseGeometry
 
+from core.config import msft_buildings_cache
 from core.detection.types import Detection, Raster
+from core.geo.raster_utils import bbox_to_pixels, raster_roi_wgs84
 
 from core.processes.base import ProcessSpec
 from core.processes.registry import register
 
+
+class MsftFootprintConfig(BaseModel):
+    """Validated kwargs for `msft-buildings`. Forbids unknown keys."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    country: str = "Kazakhstan"
+    min_area_m2: float = Field(default=20.0, ge=0.0)
+    cache_dir: str | None = None
+    index_url: str = (
+        "https://minedbuildings.z5.web.core.windows.net/global-buildings/dataset-links.csv"
+    )
+
 _DEFAULT_INDEX_URL = (
     "https://minedbuildings.z5.web.core.windows.net/global-buildings/dataset-links.csv"
 )
-_DEFAULT_CACHE_DIR = Path.home() / ".cache" / "terrascope" / "msft_buildings"
 _GEOD = Geod(ellps="WGS84")
+
+_log = logging.getLogger(__name__)
+_log.addHandler(logging.NullHandler())
 
 
 @dataclass
@@ -55,7 +71,7 @@ class MsftFootprintProcess:
     name: str = "msft-buildings"
     country: str = "Kazakhstan"
     min_area_m2: float = 20.0
-    cache_dir: Path = field(default_factory=lambda: _DEFAULT_CACHE_DIR)
+    cache_dir: Path = field(default_factory=msft_buildings_cache)
     index_url: str = _DEFAULT_INDEX_URL
 
     @classmethod
@@ -65,12 +81,12 @@ class MsftFootprintProcess:
             spec=spec,
             country=str(kw.get("country", "Kazakhstan")),
             min_area_m2=float(kw.get("min_area_m2", 20.0)),
-            cache_dir=Path(kw.get("cache_dir", _DEFAULT_CACHE_DIR)).expanduser(),
+            cache_dir=Path(kw.get("cache_dir", msft_buildings_cache())).expanduser(),
             index_url=str(kw.get("index_url", _DEFAULT_INDEX_URL)),
         )
 
     def run(self, raster: Raster) -> list[Detection]:
-        roi_wgs84 = _raster_roi_wgs84(raster)
+        roi_wgs84 = raster_roi_wgs84(raster)
         roi_geom: BaseGeometry = box(*roi_wgs84)
 
         self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -96,7 +112,7 @@ class MsftFootprintProcess:
                     continue
 
                 bbox = clipped.bounds
-                pixel_bbox = _bbox_to_pixels(bbox, raster)
+                pixel_bbox = bbox_to_pixels(bbox, raster)
                 detections.append(
                     Detection(
                         id=idx,
@@ -112,28 +128,6 @@ class MsftFootprintProcess:
                 idx += 1
 
         return detections
-
-
-def _raster_roi_wgs84(raster: Raster) -> tuple[float, float, float, float]:
-    """Return (lon_min, lat_min, lon_max, lat_max) for the raster footprint.
-
-    Honours `aoi_geom` when present; otherwise computes from the transform
-    + width/height of the loaded raster.
-    """
-    if raster.aoi_geom is not None and raster.crs.upper() in ("EPSG:4326", "OGC:CRS84"):
-        minx, miny, maxx, maxy = raster.aoi_geom.bounds
-        return (minx, miny, maxx, maxy)
-
-    a = raster.transform
-    left, top = a.c, a.f
-    right = a.c + a.a * raster.width
-    bottom = a.f + a.e * raster.height
-    minx, maxx = sorted((left, right))
-    miny, maxy = sorted((bottom, top))
-
-    if raster.crs.upper() in ("EPSG:4326", "OGC:CRS84"):
-        return (minx, miny, maxx, maxy)
-    return tuple(transform_bounds(raster.crs, "EPSG:4326", minx, miny, maxx, maxy))  # type: ignore[return-value]
 
 
 def _shards_overlapping(
@@ -164,7 +158,11 @@ def _shards_overlapping(
             try:
                 if box(*_qk_bounds(qk)).intersects(roi):
                     needed[qk] = row[col_url]
-            except ValueError:
+            except ValueError as e:
+                _log.warning(
+                    "msft-buildings: skipping invalid quadkey %r in %s: %s",
+                    qk, index_path.name, e,
+                )
                 continue
     return needed
 
@@ -243,27 +241,11 @@ def _qk_bounds(qk: str) -> tuple[float, float, float, float]:
     return lon_min, lat_min, lon_max, lat_max
 
 
-def _bbox_to_pixels(
-    bbox: tuple[float, float, float, float], raster: Raster
-) -> tuple[int, int, int, int]:
-    """Convert a geographic bbox to pixel (col_min, row_min, col_max, row_max).
-
-    Handles north-up rasters; for non-WGS84 rasters the geographic bbox is
-    first projected back to the raster CRS.
-    """
-    minx, miny, maxx, maxy = bbox
-    if raster.crs.upper() not in ("EPSG:4326", "OGC:CRS84"):
-        minx, miny, maxx, maxy = transform_bounds(
-            "EPSG:4326", raster.crs, minx, miny, maxx, maxy
-        )
-    r1, c1 = rowcol(raster.transform, minx, maxy)
-    r2, c2 = rowcol(raster.transform, maxx, miny)
-    row_min, row_max = sorted((int(r1), int(r2)))
-    col_min, col_max = sorted((int(c1), int(c2)))
-    return (col_min, row_min, col_max, row_max)
-
-
-register("msft-buildings", MsftFootprintProcess.from_spec)
+register(
+    "msft-buildings",
+    MsftFootprintProcess.from_spec,
+    config_model=MsftFootprintConfig,
+)
 
 
 __all__ = ["MsftFootprintProcess"]

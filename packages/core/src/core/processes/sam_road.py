@@ -17,7 +17,8 @@ raster can be processed by a model that was trained on fixed-size crops.
 - `sam_weights_url`       (str, default Meta's ViT-B URL) — SAM base weights
                           to seed the image encoder. Only used when the SAM
                           weights aren't already in `weights_dir`.
-- `weights_dir`           (str, default `./tmp/weights`) — local cache.
+- `weights_dir`           (str, default `$TERRASCOPE_WEIGHTS_DIR`,
+                          fallback `~/.cache/terrascope/weights`) — local cache.
 - `device`                (str, "cpu" or "cuda"). Default "cpu".
 - `class_name`            (str, default "road") — class assigned to every
                           emitted edge.
@@ -68,6 +69,7 @@ from rasterio.transform import xy
 from rasterio.warp import transform as warp_transform
 from shapely.geometry import LineString, Point
 
+from core.config import WEIGHTS_DIR
 from core.detection.types import Detection, Raster
 
 from core.processes.base import ProcessSpec
@@ -75,8 +77,6 @@ from core.processes.registry import register
 
 _log = logging.getLogger(__name__)
 _log.addHandler(logging.NullHandler())
-
-_DEFAULT_WEIGHTS_CACHE = Path("./tmp/weights")
 _DEFAULT_HF_REPO = "congrui/sam_road"
 _DEFAULT_HF_FILE = "cityscale_vitb_512_e10.ckpt"
 _DEFAULT_SAM_URL = "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth"
@@ -132,7 +132,7 @@ class SamRoadProcess:
     weights: str = _DEFAULT_HF_REPO
     weights_filename: str = _DEFAULT_HF_FILE
     sam_weights_url: str = _DEFAULT_SAM_URL
-    weights_dir: Path = field(default_factory=lambda: _DEFAULT_WEIGHTS_CACHE)
+    weights_dir: Path = field(default_factory=lambda: WEIGHTS_DIR)
     device: str = "cpu"
     class_name: str = "road"
     tile_size: int = 2048
@@ -151,7 +151,7 @@ class SamRoadProcess:
         default_factory=lambda: dict(_CITYSCALE_VITB_512), repr=False,
     )
     _model: Any = field(default=None, init=False, repr=False)
-    _config: SimpleNamespace = field(default=None, init=False, repr=False)  # type: ignore[assignment]
+    _config: SimpleNamespace | None = field(default=None, init=False, repr=False)
 
     @classmethod
     def from_spec(cls, spec: ProcessSpec) -> "SamRoadProcess":
@@ -162,7 +162,7 @@ class SamRoadProcess:
             weights=str(kw.get("weights", _DEFAULT_HF_REPO)),
             weights_filename=str(kw.get("weights_filename", _DEFAULT_HF_FILE)),
             sam_weights_url=str(kw.get("sam_weights_url", _DEFAULT_SAM_URL)),
-            weights_dir=Path(kw.get("weights_dir", _DEFAULT_WEIGHTS_CACHE)).expanduser(),
+            weights_dir=Path(kw.get("weights_dir", WEIGHTS_DIR)).expanduser(),
             device=str(kw.get("device", "cpu")),
             class_name=str(kw.get("class_name", "road")),
             tile_size=int(kw.get("tile_size", 2048)),
@@ -197,13 +197,25 @@ class SamRoadProcess:
                 f"sam-road weights {self.weights!r} is not a local path nor an HF repo id"
             )
         from huggingface_hub import hf_hub_download  # type: ignore[import-untyped]
+        from huggingface_hub.utils import (  # type: ignore[import-untyped]
+            GatedRepoError,
+            RepositoryNotFoundError,
+        )
 
         self.weights_dir.mkdir(parents=True, exist_ok=True)
-        local = hf_hub_download(
-            repo_id=self.weights,
-            filename=self.weights_filename,
-            local_dir=str(self.weights_dir / self.weights.replace("/", "__")),
-        )
+        try:
+            local = hf_hub_download(
+                repo_id=self.weights,
+                filename=self.weights_filename,
+                local_dir=str(self.weights_dir / self.weights.replace("/", "__")),
+            )
+        except (RepositoryNotFoundError, GatedRepoError) as e:
+            raise FileNotFoundError(
+                f"sam-road HuggingFace repo {self.weights!r} is unreachable "
+                f"({e.__class__.__name__}). It may be private, gated, or "
+                "removed. Either authenticate (`huggingface-cli login`), pass "
+                "a local checkpoint via kwargs.weights, or pick a different model."
+            ) from e
         return Path(local)
 
     def _load(self) -> None:

@@ -13,6 +13,7 @@ Public surface:
 - `run_processes`      orchestrator: run + merge + sequential id renumber.
 """
 
+from core.io import compute_indicators, export_geojson, load_raster, write_indicators
 from core.orchestrator import run_processes
 from core.processes.base import Process, ProcessSpec
 from core.processes.registry import build, register, registered_names
@@ -26,8 +27,12 @@ __all__ = [
     "Process",
     "ProcessSpec",
     "build",
+    "compute_indicators",
+    "export_geojson",
+    "load_raster",
     "register",
     "registered_names",
     "render_overlay",
     "run_processes",
+    "write_indicators",
 ]

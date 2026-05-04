@@ -3,226 +3,261 @@
 ## Goal
 
 Take a geo-referenced raster (GeoTIFF), run one or more pluggable
-detectors against it, and emit:
+processes against it, and emit:
 
-- `detections.geojson` — per-detection bbox polygons + metadata
+- `detections.geojson` — per-detection geometries + §5 metadata, in EPSG:4326
 - `overlay.png` — annotated source image
-- `indicators/` — per-zone counts/density/area when an AOI is supplied
+- `indicators.json` + `indicators.csv` — per-class counts/density/area for the AOI
 
-The system is multi-model first-class: a job declares a list of
-`DetectorSpec`s, each scoped to a class allowlist with its own confidence
-threshold. Outputs from every detector are merged with a `source_model`
-provenance tag and persisted together.
+The system is multi-process first-class: a job declares a list of
+`ProcessSpec`s, each scoped to a class allowlist with its own confidence
+threshold. Outputs from every process are merged with a `source_model`
+provenance tag and written together.
 
 ## High-level pipeline
 
 ```
-            ┌─────────────────────────────────────────────────────────┐
-GeoTIFF ──▶ │  load_imagery   detect   export   indicators   finalize │ ──▶ outputs/
-            └─────────────────────────────────────────────────────────┘
-                                ▲
-                                │
-                       DetectorSpec[]  (from job.config.detectors)
+            ┌────────────────────────────────────────────────────────────────┐
+GeoTIFF ──▶ │ load_raster   run_processes   render_overlay   export   indicators │ ──▶ output/
+            └────────────────────────────────────────────────────────────────┘
+                              ▲
+                              │
+                     ProcessSpec[]  (from job.config.processes)
 ```
 
-Five sequential Temporal activities, idempotent via a checkpoint stored on
-`ProcessingJob.checkpoint_data`. Each activity reads what it needs from the
-prior step's checkpoint slot.
+A single in-process pipeline. There is **no database, no queue, no
+async runtime**: the CLI walks the raster through the five steps in
+order. An earlier iteration used FastAPI + Temporal + Postgres/PostGIS;
+that layer was removed in favor of the simpler local pipeline.
 
 ## Code layout
 
 ```
 packages/
-  core/      shared domain — models, schemas, services, detection module
-  api/       FastAPI: POST /processing/start, GET status, GET results
-  worker/    Temporal workflow + activities
-  cli/       Typer CLI (`terrascope process …`) — runs locally or submits
-             a job to the worker
-infra/       Docker Compose (Postgres+PostGIS, Temporal, Elasticsearch)
-scripts/     Sample bash invocations
-docs/        This document, plan, class analysis
+  core/
+    src/core/
+      detection/     Detection / Raster dataclasses + filter_detections helper
+      io/            load_raster (rasterio), export_geojson, write_indicators
+      geo/           CRS / bbox helpers shared across processes
+      processes/     One Process per (model, dataset) pair, plus registry
+      vendor/sam_road/  Vendored sam_road inference code
+      orchestrator.py
+      renderer.py    PNG overlay
+      config.py      Env-driven cache + weights paths
+  cli/               Typer CLI (`terrascope`)
+infra/               Docker Compose (legacy; not required for the CLI)
+docs/                This document, plan, assignment spec
 ```
 
-## Detection layer
+## Process layer
 
-The detection contract is one Protocol:
+The contract is one Protocol:
 
 ```python
-class Detector(Protocol):
+class Process(Protocol):
     name: str
-    def detect(self, raster: Raster) -> list[Detection]: ...
+    spec: ProcessSpec
+    def run(self, raster: Raster) -> list[Detection]: ...
 ```
 
-Implementations live in `packages/core/src/core/detection/` and never leak
-model-specific structures upward — only `Detection` objects.
+Implementations live in `packages/core/src/core/processes/` and never
+leak model-specific structures upward — only `Detection` objects. Unlike
+a pure inference contract, a `Process` owns its full pipeline: it may
+download external data (OSM, MS Building Footprints), preprocess to a
+target GSD, run inference, and post-process — all inside `run()`.
 
-### DetectorSpec — declarative job config
+### ProcessSpec — declarative job config
 
 ```python
 @dataclass(frozen=True)
-class DetectorSpec:
-    name: str                              # factory key
+class ProcessSpec:
+    name: str                              # registry key
     classes: tuple[str, ...] | None = None # allowlist; None = accept all
-    min_confidence: float | None = None    # per-detector override
+    min_confidence: float | None = None    # per-process override
     kwargs: dict[str, Any] = field(default_factory=dict)
 ```
 
-A job's config carries `detectors: list[DetectorSpec dict]`. The detection
-activity parses these via `DetectorSpec.list_from_config()` and hands them
-to `build_from_specs()`.
+A job's config carries `processes: list[ProcessSpec dict]`. The CLI
+parses each via `ProcessSpec.from_dict()` and resolves them through
+`build()`.
 
-### Factory (`detection/factory.py`)
+### Registry (`processes/registry.py`)
 
-`_BUILDERS: dict[str, Callable[..., Detector]]` — one entry per registered
-preset. Adding a detector = one entry plus a class implementing the
-`Detector` Protocol. Currently registered:
+`_BUILDERS: dict[str, _Entry]` — one entry per registered process. Each
+entry pairs a builder callable with an optional Pydantic config model.
+Adding a process = one `register("my-key", MyProcess.from_spec, config_model=…)`
+call (the `config_model` is optional). Currently registered:
 
-| Key                        | Backend / weights                                      |
-|----------------------------|--------------------------------------------------------|
-| `yolov8n-sahi`             | `yolov8n.pt` (COCO 80 generic)                         |
-| `yolov8-obb-aerial`        | `yolov8s-obb.pt` (DOTA v1 — 15 aerial)                 |
-| `yolov8-obb-dota-v2`       | `yolov8x-obb.pt` (DOTA v2 — sports + bridge + cars)    |
-| `yolov8-satellite-vehicle` | `keremberke/yolov8m-satellite-vehicle-detection` (HF)  |
-| `segformer-landscape`      | `nvidia/segformer-b0-finetuned-ade-512-512`            |
-| `beit-ade`                 | `microsoft/beit-large-finetuned-ade-640-640`           |
-| `aerial-road-segmenter`    | user-supplied HF checkpoint trained on nadir roads     |
+| Key                        | Backend / data source                                    |
+|----------------------------|----------------------------------------------------------|
+| `msft-buildings`           | Microsoft Global Building Footprints (vector, no model)  |
+| `osm-roads`                | OpenStreetMap via Overpass API (vector, no model)        |
+| `unet-roads`               | Local U-Net checkpoint (`road_unet.pth`, segmentation)   |
+| `sam-road`                 | `congrui/sam_road` cityscale ViT-B 512 (graph extraction)|
+| `sam-road-spacenet`        | sam-road SpaceNet ViT-B 256 preset                       |
+| `yolov8n-sahi`             | `yolov8n.pt` (COCO 80 generic) via SAHI                  |
+| `yolov8-obb-aerial`        | `yolov8s-obb.pt` (DOTA v1, 15 aerial classes)            |
+| `yolov8-obb-dota-v2`       | `yolov8x-obb.pt` (DOTA v2)                               |
+| `yolov8-satellite-vehicle` | `keremberke/yolov8m-satellite-vehicle-detection` (HF)    |
+| `yolo26{n,m}-sahi`, `yolo26-obb`, `yolo26-seg` | YOLO26 (Ultralytics late-2025 successor) |
 
-`build_from_specs(specs)` always wraps leaves in a
-`CompositeDetector(pairs=[(leaf, spec), …])`. Single-spec jobs go through
-the same path as multi-spec jobs, so per-spec filtering and `source_model`
-stamping are enforced in exactly one place.
+#### Optional Pydantic kwargs validation
 
-### CompositeDetector
+Builders may pass `config_model=SomeBaseModel` to `register()`. When
+present, `build(spec)` validates `spec.kwargs` against the model and
+raises `ValueError("Invalid kwargs for process X: …")` on unknown keys
+or wrong types — opt-in, fully backwards compatible.
+
+`msft-buildings` is the reference implementation
+(`MsftFootprintConfig`, forbids extra keys); the rest still accept the
+raw dict and self-validate inside `from_spec`.
+
+### Orchestrator
+
+`run_processes(procs, raster) -> list[Detection]` walks each process in
+spec order:
 
 ```python
-for child, spec in self.pairs:
-    for det in child.detect(raster):
-        if spec.classes is not None and det.class_name not in spec.classes:
+for proc in processes:
+    spec = proc.spec
+    allow = set(spec.classes) if spec.classes is not None else None
+    for det in proc.run(raster):
+        if allow is not None and det.class_name not in allow:
             continue
         if spec.min_confidence is not None and det.confidence < spec.min_confidence:
             continue
-        det = replace(det, source_model=child.name)
+        if det.source_model != proc.name:
+            det = replace(det, source_model=proc.name)
         merged.append(det)
 return [replace(d, id=i) for i, d in enumerate(merged)]
 ```
 
-No cross-model NMS — class-level deduplication is left to the model that
-owns the class via the allowlist.
+Per-spec class allowlist + per-spec confidence floor + provenance
+stamping + sequential id renumber. There is **no cross-process NMS** —
+class-level deduplication is left to the process that owns the class
+via the allowlist. Processes that need internal NMS (sam-road, SAHI)
+handle it themselves.
 
 ### Backends
 
-- **YoloSahiDetector** — Ultralytics + SAHI. Auto-picks single-pass
-  inference for rasters ≤1024 px on the long side; otherwise SAHI sliced
-  prediction (slice 640, overlap 0.2) with Greedy-NMM merge.
-- **SegformerLandscapeDetector** — HuggingFace
-  `AutoModelForSemanticSegmentation`. Downsamples to `max_dim` (default
-  1024), argmax → connected components → bbox per component. Reused for
-  both `segformer-landscape` and `beit-ade` (same ADE20K label space, just
-  different `model_name`).
-
-### Postprocessing
-
-Two stages, both intentionally minimal:
-
-1. **CompositeDetector**: per-spec class allowlist + per-spec confidence
-   floor + provenance stamping.
-2. **`filter_detections()`**: global confidence floor (`min_confidence`,
-   default 0.25) — applied as a *default*, not a hard floor: when the
-   `specs` list is supplied, detections whose `source_model` matches a
-   spec with an explicit `min_confidence` skip the global check (the
-   per-spec value already filtered them in `CompositeDetector`). Then
-   AOI centroid containment (when an AOI is provided) + sequential id
-   renumber 0..N. SAHI handles slice merging during inference, so no
-   separate NMS step.
-
-## Temporal workflow
-
-`ProcessingWorkflow.run(job_id)` chains 5 activities sequentially, each
-with its own retry policy (`_ml_retry` for `detect`, `_default_retry` for
-the rest), 10-minute timeouts (30 min for `detect`):
-
-| # | Activity            | Reads from checkpoint | Writes to checkpoint                          |
-|---|---------------------|-----------------------|-----------------------------------------------|
-| 1 | `load_imagery`      | —                     | `load`: `clipped_path`, `transform`, `crs`, `aoi_wkt` |
-| 2 | `detect`            | `load`                | `detect`: `detectors`, `detection_count`, `overlay_path`; persists rows to `detections` |
-| 3 | `export_results`    | `detect` (DB rows)    | `export`: `geojson_path`                      |
-| 4 | `compute_indicators`| `detect` + AOI        | `indicators`: paths to CSV/JSON               |
-| 5 | `finalize_job`      | —                     | sets `status=COMPLETED`, `completed_at`       |
-
-Idempotency: each activity checks its slot and skips work if already
-populated. Failures retry per the policy; non-retryable types
-(`FileNotFoundError`, `ValueError`) abort.
-
-## Data model
-
-Postgres + PostGIS, all geometry SRID 4326:
-
-```
-territories         — registered AOIs
-processing_jobs     — id (UUID), status, input_path, config (JSON),
-                      checkpoint_data (JSON), error_message,
-                      created/updated/completed timestamps
-detections          — composite PK (job_id, id), class_name, confidence,
-                      source_model, geometry (POLYGON bbox)
-zone_indicators     — per-zone count, density_per_km2, total_area_m2
-quality_metrics     — placeholder, currently unused
-```
-
-Migrations are sequential Alembic versions in
-`packages/core/src/core/alembic/versions/`. Latest: `007_detection_source_model`.
-
-## Async + concurrency model
-
-- FastAPI handlers are async; SQLAlchemy uses `asyncpg`.
-- ML/torch/rasterio code is blocking. Activities wrap blocking calls in
-  `asyncio.to_thread()` at the async boundary
-  (e.g. `await asyncio.to_thread(build_from_specs, specs)`,
-  `await asyncio.to_thread(detector.detect, raster)`).
-- Temporal activity workers run blocking work without starving the FastAPI
-  event loop because they're separate processes.
+- **MsftFootprintProcess / OsmRoadsProcess** — vector-only. Fetch from
+  CDN / Overpass, cache shards on disk under `$TERRASCOPE_CACHE_DIR`,
+  clip to the AOI, emit detections. OSM tile fetches fan out across a
+  thread pool (`max_workers=8`); a DNS / connection-refused error
+  latches the rest of the run into cache-only mode.
+- **UnetRoadsProcess** — sliding 512×512 patches, sigmoid-averaged
+  probability map, threshold + `rasterio.features.shapes` →
+  Polygon detections.
+- **SamRoadProcess** — graph extraction via the vendored sam-road
+  network. Tiles the raster on top of the model's internal patch grid;
+  stitches tile graphs by collapsing nodes within `ROAD_NMS_RADIUS`.
+  Resamples to the checkpoint's training GSD when `source_gsd_m_per_px`
+  is set, so high-res inputs don't see microscope-scale imagery.
+- **YoloSahiProcess** — Ultralytics + SAHI. Single-pass inference for
+  long-side ≤ `full_image_threshold` (default 1024); otherwise SAHI
+  sliced prediction. HuggingFace checkpoints are downloaded once into
+  `$TERRASCOPE_WEIGHTS_DIR`; gated/missing repos surface as a clean
+  `FileNotFoundError` with a `huggingface-cli login` hint.
 
 ## CRS handling
 
-CRS is passed explicitly through the pipeline rather than inferred:
-`ImageryLoaderService.load_clipped()` returns it in `Raster.crs`; the
-`load` checkpoint persists `crs` as a string; downstream activities
-hydrate it back into `Raster` instances. Geographic computations (area,
-density) use `pyproj.Geod(ellps="WGS84")` — never raw `geometry.area`,
-which is meaningless on lon/lat.
+CRS is propagated explicitly through the pipeline:
 
-## Output schema
+- `load_raster()` returns a `Raster` carrying its native CRS string and
+  the optional WGS84 AOI used for clipping.
+- Process internals work in the raster's CRS; vector-data fetches
+  (OSM, MSFT) project from WGS84 into the raster CRS using the shared
+  helpers in `core/geo/raster_utils.py`
+  (`raster_roi_wgs84`, `bbox_to_pixels`).
+- The exporter reprojects to **EPSG:4326** on the way out so the layer
+  opens cleanly in QGIS aligned to any web base map (§5, §10).
+- Geographic computations (area, length, density) use
+  `pyproj.Geod(ellps="WGS84")` — never raw `geometry.area`, which is
+  meaningless on lon/lat.
 
-`detections.geojson` is a `FeatureCollection` of polygon (bbox) features:
+## Output schema (assignment §5)
+
+`detections.geojson` is a `FeatureCollection` in **EPSG:4326**. Each
+feature carries:
 
 | Field          | Type    |                                                           |
 |----------------|---------|-----------------------------------------------------------|
 | `id`           | int     | 0..N, post-filter sequential                              |
-| `class_name`   | string  | model-native label                                        |
-| `confidence`   | float   | [0, 1]                                                    |
-| `source_model` | string  | which detector emitted this (e.g. `segformer-landscape`)  |
-| geometry       | Polygon | bbox in EPSG:4326                                         |
+| `class`        | string  | model-native label (renamed from internal `class_name`)   |
+| `confidence`   | float   | **0–100** (scaled at export from internal 0–1)            |
+| `source`       | string  | scene identifier (input GeoTIFF stem)                     |
+| `source_model` | string  | which process emitted this (e.g. `osm-roads`)             |
+| `area_m2`      | float   | optional, polygons only — geodesic                        |
+| `length_m`     | float   | optional, lines only — geodesic                           |
+| `centroid_wkt` | string  | for tools that don't read GeoJSON geometry directly       |
+| `bbox`         | list    | raster-CRS bbox `[minx, miny, maxx, maxy]`                |
+| `pixel_bbox`   | list    | raster pixel frame `[col_min, row_min, col_max, row_max]` |
+| `geometry`     | Geometry| Point / LineString / Polygon / Multi*, EPSG:4326          |
 
-## Adding a new detector
+`indicators.json` (and a flat `indicators.csv` mirror) contains:
 
-1. Implement a class with `name: str` and `detect(raster) -> list[Detection]`.
-   `CompositeDetector` re-stamps `source_model=self.name` for each emission,
-   so leaves don't need to set it (but may, for clarity).
-2. Add a builder function and a `_BUILDERS["my-key"] = _build_my`
-   registration in `factory.py`.
-3. Submit jobs with `{"detectors": [{"name": "my-key", "classes": [...]}]}`.
+```json
+{
+  "zone_area_m2": <number>,
+  "total_detections": <int>,
+  "by_class": [
+    {"class": "building", "count": 42,
+     "total_area_m2": 1234.5, "total_length_m": 0.0,
+     "density_per_km2": 0.84, "area_fraction": 0.012},
+    ...
+  ]
+}
+```
 
-No changes to workflow, worker, exporter, schema, or DB.
+The zone is taken from `Raster.aoi_geom` when an AOI was supplied,
+otherwise from the raster footprint. All areas / lengths are geodesic.
+
+## Configuration
+
+Three optional environment variables, all with sane defaults:
+
+| Variable                  | Default                              | Used for                              |
+|---------------------------|--------------------------------------|---------------------------------------|
+| `TERRASCOPE_CACHE_DIR`    | `~/.cache/terrascope`                | OSM tiles, MSFT shards, dataset CSVs  |
+| `TERRASCOPE_WEIGHTS_DIR`  | `$TERRASCOPE_CACHE_DIR/weights`      | HF / SAM checkpoint cache             |
+| `TERRASCOPE_LOG_LEVEL`    | `WARNING`                            | Root log level                        |
+
+Per-process overrides via `ProcessSpec.kwargs.cache_dir` /
+`weights_dir` always win over the env defaults.
+
+## Adding a new process
+
+1. Implement a `@dataclass` with:
+   - `spec: ProcessSpec`, `name: str`
+   - `from_spec(cls, spec) -> Self` classmethod
+   - `run(self, raster) -> list[Detection]`
+2. (Optional) Define a `pydantic.BaseModel` with `extra="forbid"` for
+   strict kwargs validation.
+3. `register("my-key", MyProcess.from_spec, config_model=MyConfig)`.
+4. Submit jobs with `{"processes": [{"name": "my-key", ...}]}`.
+
+No changes to the orchestrator, exporter, indicators, or CLI.
+
+## Tiling and false-positive control (assignment §6)
+
+- **Tiling**: `osm-roads` splits the AOI into a grid of `tile_size_deg`
+  tiles, fetched concurrently and merged by element id. `sam-road`
+  tiles the raster on top of the model's internal patch grid and
+  stitches graphs across seams. `unet-roads` slides patches with
+  `patch_size // 2` stride and averages overlapping probabilities.
+- **False-positive reduction**: per-process size filters
+  (`min_area_px`, `min_area_m2`, `min_edge_len_m`), AOI clipping,
+  oriented-envelope simplification in the renderer, NMS inside
+  sam-road and SAHI, and the spec-level `classes` allowlist + global
+  `min_confidence` applied by the orchestrator.
 
 ## Known limitations
 
-- ADE20K segmentation models (`segformer-landscape`, `beit-ade`) were
-  trained on street-level oblique imagery. On true nadir aerial they
-  under-segment and miss small features — known fit issue, not a config
-  problem. Tunable knobs:
-  `kwargs.max_dim` (raise to keep small features after downsampling),
-  `kwargs.min_pixels` (lower to keep small CCs).
-- `quality_metrics` table is unused.
-- No cross-model NMS; overlapping detections from different models are
-  both kept. `DetectorSpec.list_from_config` enforces disjoint `classes`
-  allowlists across specs at submission time, and rejects mixing
-  accept-all (`classes=None`) with constrained specs in the same job.
+- No cross-process NMS — overlapping detections from different
+  processes are both kept. Disjoint `classes` allowlists per spec
+  remain the recommended way to prevent double-counting.
+- `unet-roads` checkpoint must be supplied locally; there's no auto
+  download (it's a project-trained model, not a published one).
+- No quality metrics computation in code — assignment §7 metrics
+  (precision/recall/IoU) belong in the report deliverable, evaluated
+  externally against a labeled control sample.

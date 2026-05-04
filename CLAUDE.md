@@ -2,39 +2,48 @@
 
 ## Project Overview
 
-Terrascope is a satellite imagery analysis system that detects objects (buildings, roads, vegetation, water) in GeoTIFF imagery and exports results as GIS layers (GeoJSON, GeoPackage). It computes zone-level indicators and quality metrics.
+Terrascope is a satellite imagery analysis tool that detects objects (buildings, roads, vehicles, etc.) in GeoTIFF imagery and exports the results as a GeoJSON layer plus a PNG overlay. Each detector is implemented as a self-contained `Process`; the orchestrator runs a list of processes against one raster and merges their output.
 
-**Tech stack:** Python 3.14, SQLModel, PostgreSQL + PostGIS, PyTorch + TorchGeo + SAMGeo, uv workspaces monorepo. Linting with ruff and pyright.
+**Tech stack:** Python 3.14, PyTorch + SAMGeo + Ultralytics + SAHI, rasterio, shapely, pyproj, Typer CLI, uv workspaces monorepo. Linting with ruff, type-checking with pyright.
 
 ## Repository Structure
 
 ```
 packages/
-  core/    # Shared models, schemas, services, config, database
-  cli/     # Typer CLI tool
-  core/alembic/  # Database migrations (inside core package)
-infra/     # Docker Compose configs (Postgres)
-tests/     # Mirrors packages/ structure
-docs/      # Assignment spec and implementation plan
+  core/              # Detection types, processes, orchestrator, IO, geo helpers
+    src/core/
+      detection/     # Detection / Raster dataclasses + filter helpers
+      io/            # load_raster (rasterio) + export_geojson
+      geo/           # CRS / bbox-to-pixel helpers shared by processes
+      processes/     # One Process per (model, dataset) pair
+      vendor/sam_road/  # Vendored upstream sam_road inference code
+      orchestrator.py
+      renderer.py    # PNG overlay
+      config.py      # Env-driven cache + weights paths
+  cli/               # Typer CLI tool (`terrascope`)
+tests/               # pytest, mirrors packages/ structure
 ```
+
+There is **no database, no ORM, no async runtime.** A previous iteration used SQLModel + PostGIS + Alembic + Temporal; that layer was removed in favor of the simpler process-only pipeline. Don't reintroduce it without an explicit ask.
 
 ## Setup
 
 ```bash
 uv sync
-cp .env.example .env
-docker compose -f infra/compose/compose.yml --env-file .env up -d
-uv run alembic -c packages/core/src/core/alembic.ini upgrade head
+cp .env.example .env  # optional — only env vars are TERRASCOPE_CACHE_DIR/WEIGHTS_DIR/LOG_LEVEL
 ```
 
 ## Common Commands
 
 ```bash
-# Run tests
-uv run pytest
+# Run a job
+uv run terrascope --config packages/cli/examples/job.example.json
 
-# Run tests with coverage
-uv run pytest --cov
+# List registered processes
+uv run terrascope --list-processes
+
+# Tests
+uv run pytest
 
 # Linting
 uvx ruff check .
@@ -42,53 +51,35 @@ uvx ruff format .
 
 # Type checking
 uvx pyright
-
-# Database migration
-uv run alembic -c packages/core/src/core/alembic.ini revision --autogenerate -m "description"
-uv run alembic -c packages/core/src/core/alembic.ini upgrade head
 ```
 
-## Architecture & Conventions
+## Architecture
 
-- **Monorepo via uv workspaces** - each package under `packages/` has its own `pyproject.toml`; root `pyproject.toml` declares the workspace
-- **Async everywhere** - AsyncPG, async SQLAlchemy sessions
-- **SQLModel** - combined ORM + Pydantic validation in a single class. Models live in `packages/core/src/core/models/`
-- **PostGIS** - all geometry stored with SRID=4326 using GeoAlchemy2
-- **Config** - pydantic-settings `Settings` class in `core/config.py`, reads from `.env`
-- **CRS propagation** - CRS is passed explicitly through the pipeline: `clip_to_aoi()` returns CRS string, `Tile` has `crs` field, model wrappers accept `crs` param
-- **Geodesic accuracy** - use `pyproj.Geod(ellps="WGS84")` for area/distance computations on geographic coordinates, not raw `geometry.area`
-- **Blocking I/O in async** - wrap blocking libs (rasterio, pystac-client) in `asyncio.to_thread()` at the async boundary
+- **`Process` protocol** (`core.processes.base.Process`): each implementation owns its full pipeline — download external data, preprocess, run inference, post-process — and emits a `list[Detection]`. Built-in processes register themselves on import via `core.processes.registry.register`.
+- **`ProcessSpec`** is the declarative job-side config: `name`, optional class allowlist, optional `min_confidence`, and a process-specific `kwargs` dict. CLI configs are lists of these.
+- **`run_processes(procs, raster)`** runs each process in order, applies the spec's allowlist + min_confidence, stamps `source_model`, and renumbers ids 0..N.
+- **`Raster`** is HWC uint8 data + a rasterio `Affine` + a CRS string + an optional WGS84 AOI. `Detection` carries both world-CRS `bbox`/`geometry` and pixel-frame `pixel_bbox` so downstream code never has to re-project.
+- **CRS propagation** is explicit: `load_raster()` returns a `Raster` carrying its native CRS; processes convert WGS84 vector data into the raster's CRS via the shared helpers in `core.geo.raster_utils`.
+- **Geodesic accuracy:** use `pyproj.Geod(ellps="WGS84")` for area/length on geographic coordinates — never raw `geom.area`. See `msft_footprints.py` and `sam_road.py` for examples.
 
 ## Code Style
 
-- Type hints on all function signatures (Python 3.14+ — use built-in generics: `list`, `dict`, `tuple`, not `typing.List`)
-- `snake_case` for functions/variables, `PascalCase` for classes, `UPPER_CASE` for constants
-- No legacy compatibility code — target Python 3.14 only
-- Prefer `async def` for I/O-bound operations
-- Keep models in `core/models/`, schemas in `core/schemas/`, business logic in `core/services/`
+- Type hints on every public function. Use built-in generics (`list`, `dict`, `tuple`) — not `typing.List`.
+- `snake_case` for functions/variables, `PascalCase` for classes, `UPPER_CASE` for constants.
+- No legacy compatibility code — Python 3.14 only.
+- Don't write multi-line comment blocks or docstrings explaining what code does — only the why when non-obvious.
+- Default to writing no comments. The bar is "would removing this confuse a future reader?"
 
-## Database
+## Caching
 
-- PostgreSQL with PostGIS extension
-- Migrations via Alembic (sequential numbering: `001_`, `002_`, ...)
-- Tables: `territories`, `processing_jobs`, `detections`, `zone_indicators`, `quality_metrics`
-- UUID primary keys, JSON columns for flexible config/checkpoint data
-- Foreign keys have `index=True` for query performance
+- OSM Overpass responses → `$TERRASCOPE_CACHE_DIR/osm_roads/`
+- Microsoft Building Footprint shards → `$TERRASCOPE_CACHE_DIR/msft_buildings/`
+- Model checkpoints (HF Hub, SAM) → `$TERRASCOPE_WEIGHTS_DIR` (default `$TERRASCOPE_CACHE_DIR/weights`)
+
+All paths can also be overridden per-process via `ProcessSpec.kwargs.cache_dir` / `weights_dir`.
 
 ## Testing
 
-- pytest with `asyncio_mode=auto`
-- Test files mirror source structure under `tests/`
-- Integration tests go in `tests/integration/`
-
-## Key Ports (Local Development)
-
-| Service    | Port  |
-|------------|-------|
-| PostgreSQL | 35432 |
-
-## Implementation Plan
-
-The full implementation plan with phases, steps, and status is in `docs/plan.md`. Always refer to it before starting work on a phase or step.
-
-Phases 1-10 are complete. AOI is now optional in both CLI and API (falls back to full raster extent).
+- pytest, no async mode needed.
+- Tests are pure: no database, no live network. OSM and HuggingFace are patched with `unittest.mock.patch`. SAM-Road tests exercise pure-numpy helpers only.
+- Test files mirror source structure under `tests/`.

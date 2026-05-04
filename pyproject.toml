@@ -13,13 +13,8 @@ members = ["packages/*"]
 dev = [
     "pytest>=9.0.3",
     "pytest-cov>=6.1",
-    "pytest-asyncio>=1.0",
-    "httpx>=0.28",
-    "alembic>=1.15",
     "terrascope-core",
     "terrascope-cli",
-    "python-dotenv>=1.2.2",
-    "greenlet>=3.0.3",
 ]
 
 [tool.uv.sources]
@@ -33,4 +28,3 @@ extraPaths = ["packages/core/src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-asyncio_mode = "auto"

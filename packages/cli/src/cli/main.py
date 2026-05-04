@@ -16,7 +16,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import typer
+from shapely.errors import GEOSException
 from shapely.geometry import shape as shapely_shape
+from shapely.geometry.base import BaseGeometry
 
 app = typer.Typer(
     name="terrascope", help="Terrascope cli — per-process pipeline (experimental)"
@@ -47,6 +49,35 @@ class JobConfig:
     output: Path
     processes: list[dict]
     aoi: Path | None = None
+
+
+def _fail(message: str, code: int = 2) -> typer.Exit:
+    """Print `message` to stderr and return a typer.Exit to raise."""
+    typer.echo(f"Error: {message}", err=True)
+    return typer.Exit(code=code)
+
+
+def _load_json(path: Path, what: str) -> object:
+    """Read+parse JSON from `path`, surfacing decode errors as CLI errors."""
+    try:
+        text = path.read_text()
+    except OSError as e:
+        raise _fail(f"could not read {what} {path}: {e}") from e
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as e:
+        raise _fail(
+            f"{what} {path} is not valid JSON (line {e.lineno}, col {e.colno}): {e.msg}"
+        ) from e
+
+
+def _parse_json_str(text: str, what: str) -> object:
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as e:
+        raise _fail(
+            f"{what} is not valid JSON (line {e.lineno}, col {e.colno}): {e.msg}"
+        ) from e
 
 
 @app.callback(invoke_without_command=True)
@@ -115,12 +146,11 @@ def _resolve_job(
     base_dir: Path | None = None
     if config_path is not None:
         if not config_path.exists():
-            typer.echo(f"Error: config file not found: {config_path}", err=True)
-            raise typer.Exit(code=2)
-        raw = json.loads(config_path.read_text())
-        if not isinstance(raw, dict):
-            typer.echo("Error: config file must be a JSON object.", err=True)
-            raise typer.Exit(code=2)
+            raise _fail(f"config file not found: {config_path}")
+        parsed = _load_json(config_path, "config file")
+        if not isinstance(parsed, dict):
+            raise _fail("config file must be a JSON object.")
+        raw = parsed
         base_dir = config_path.parent
 
     def _resolve_path(value: str | Path) -> Path:
@@ -133,8 +163,7 @@ def _resolve_job(
     if input_value is None and "input" in raw:
         input_value = _resolve_path(raw["input"])
     if input_value is None:
-        typer.echo("Error: --input or config.input is required.", err=True)
-        raise typer.Exit(code=2)
+        raise _fail("--input or config.input is required.")
 
     aoi_value: Path | None = aoi_override
     if aoi_value is None and raw.get("aoi"):
@@ -144,21 +173,20 @@ def _resolve_job(
     if output_value is None and "output" in raw:
         output_value = _resolve_path(raw["output"])
     if output_value is None:
-        output_value = Path("./output2")
+        output_value = Path("./output")
 
     process_specs: list[dict]
     if processes_override is not None:
-        process_specs = json.loads(processes_override)
+        parsed_p = _parse_json_str(processes_override, "--processes")
+        if not isinstance(parsed_p, list):
+            raise _fail("--processes must be a JSON list.")
+        process_specs = parsed_p
     elif "processes" in raw:
+        if not isinstance(raw["processes"], list):
+            raise _fail("'processes' must be a list.")
         process_specs = raw["processes"]
     else:
-        typer.echo(
-            "Error: --processes or config.processes is required.", err=True
-        )
-        raise typer.Exit(code=2)
-    if not isinstance(process_specs, list):
-        typer.echo("Error: 'processes' must be a JSON list.", err=True)
-        raise typer.Exit(code=2)
+        raise _fail("--processes or config.processes is required.")
 
     return JobConfig(
         input=input_value,
@@ -168,26 +196,55 @@ def _resolve_job(
     )
 
 
-def _run(job: JobConfig) -> None:
-    from core.services.exporter import GISExporterService
-    from core.services.imagery import ImageryLoaderService
+def _load_aoi(path: Path) -> BaseGeometry:
+    """Read a GeoJSON AOI from disk, surfacing decode/geometry errors clearly."""
+    if not path.exists():
+        raise _fail(f"AOI file not found: {path}")
+    parsed = _load_json(path, "AOI file")
+    if not isinstance(parsed, dict):
+        raise _fail(f"AOI file {path} must contain a GeoJSON object.")
+    # Accept either a bare geometry or a Feature/FeatureCollection.
+    geom_dict = parsed
+    if parsed.get("type") == "Feature":
+        geom_dict = parsed.get("geometry") or {}
+    elif parsed.get("type") == "FeatureCollection":
+        feats = parsed.get("features") or []
+        if not feats:
+            raise _fail(f"AOI file {path} has no features.")
+        geom_dict = feats[0].get("geometry") or {}
+    try:
+        return shapely_shape(geom_dict)
+    except (GEOSException, ValueError, TypeError, KeyError) as e:
+        raise _fail(f"AOI file {path} is not a valid geometry: {e}") from e
 
-    from core import ProcessSpec, build, render_overlay, run_processes
+
+def _run(job: JobConfig) -> None:
+    from core import (
+        ProcessSpec,
+        build,
+        export_geojson,
+        load_raster,
+        render_overlay,
+        run_processes,
+        write_indicators,
+    )
 
     job.output.mkdir(parents=True, exist_ok=True)
 
-    aoi_geom = (
-        shapely_shape(json.loads(job.aoi.read_text()))
-        if job.aoi is not None
-        else None
-    )
+    aoi_geom = _load_aoi(job.aoi) if job.aoi is not None else None
+
+    if not job.input.exists():
+        raise _fail(f"input GeoTIFF not found: {job.input}")
 
     typer.echo(f"Loading imagery from {job.input}...")
-    raster = ImageryLoaderService().load_clipped(job.input, aoi_geom)
+    raster = load_raster(job.input, aoi_geom)
     typer.echo(f"  Shape: {raster.data.shape}, CRS: {raster.crs}")
 
-    specs = [ProcessSpec.from_dict(p) for p in job.processes]
-    procs = [build(s) for s in specs]
+    try:
+        specs = [ProcessSpec.from_dict(p) for p in job.processes]
+        procs = [build(s) for s in specs]
+    except ValueError as e:
+        raise _fail(str(e)) from e
     typer.echo(f"Running {len(procs)} process(es): {[p.name for p in procs]}")
 
     detections = run_processes(procs, raster)
@@ -197,9 +254,16 @@ def _run(job: JobConfig) -> None:
     render_overlay(raster, detections, overlay_path)
     typer.echo(f"  PNG overlay: {overlay_path}")
 
+    # Scene identifier for the §5 `source` field — input filename stem.
+    scene_id = job.input.stem
     geojson_path = job.output / "detections.geojson"
-    GISExporterService().export_geojson(detections, geojson_path, crs=raster.crs)
-    typer.echo(f"  GeoJSON: {geojson_path}")
+    export_geojson(detections, geojson_path, crs=raster.crs, source=scene_id)
+    typer.echo(f"  GeoJSON (EPSG:4326): {geojson_path}")
+
+    indicators_json, indicators_csv = write_indicators(
+        detections, job.output, raster=raster
+    )
+    typer.echo(f"  Indicators:  {indicators_json}, {indicators_csv}")
 
     typer.echo("Done.")
 

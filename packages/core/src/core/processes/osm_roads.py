@@ -51,15 +51,16 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from rasterio.transform import rowcol
-from rasterio.warp import transform_bounds
 from shapely.geometry import LineString, MultiLineString, Point, box
 
+from core.config import osm_roads_cache
 from core.detection.types import Detection, Raster
+from core.geo.raster_utils import bbox_to_pixels, raster_roi_wgs84
 
 from core.processes.base import ProcessSpec
 from core.processes.registry import register
@@ -68,7 +69,6 @@ _log = logging.getLogger(__name__)
 _log.addHandler(logging.NullHandler())
 
 _DEFAULT_OVERPASS_URL = "https://overpass-api.de/api/interpreter"
-_DEFAULT_CACHE_DIR = Path.home() / ".cache" / "terrascope" / "osm_roads"
 
 # OSM ``highway`` tag value → broad class name used in Detection.
 # Only tags present in this map are emitted; everything else is dropped.
@@ -126,12 +126,13 @@ class OsmRoadsProcess:
     spec: ProcessSpec
     name: str = "osm-roads"
     overpass_url: str = _DEFAULT_OVERPASS_URL
-    cache_dir: Path = field(default_factory=lambda: _DEFAULT_CACHE_DIR)
+    cache_dir: Path = field(default_factory=osm_roads_cache)
     class_map: dict[str, str] = field(default_factory=lambda: dict(_DEFAULT_CLASS_MAP))
     server_timeout: int = 180   # QL [timeout:N] — server-side processing budget
     timeout: int = 220          # HTTP socket timeout; must exceed server_timeout
     tile_size_deg: float = 0.1  # split AOI into ≤ this-deg-per-side tiles
     max_retries: int = 3        # per-tile retries on transient 5xx / timeouts
+    max_workers: int = 8        # cap on concurrent Overpass tile fetches
     # Latched true when a DNS / connection-refused error is seen on any
     # tile. Subsequent tiles in the same run skip the network and serve
     # only from cache. Reset at the start of every `_fetch_or_load`.
@@ -149,16 +150,17 @@ class OsmRoadsProcess:
         return cls(
             spec=spec,
             overpass_url=str(kw.get("overpass_url", _DEFAULT_OVERPASS_URL)),
-            cache_dir=Path(kw.get("cache_dir", _DEFAULT_CACHE_DIR)).expanduser(),
+            cache_dir=Path(kw.get("cache_dir", osm_roads_cache())).expanduser(),
             class_map=class_map,
             server_timeout=int(kw.get("server_timeout", 180)),
             timeout=int(kw.get("timeout", 220)),
             tile_size_deg=float(kw.get("tile_size_deg", 0.1)),
             max_retries=int(kw.get("max_retries", 3)),
+            max_workers=int(kw.get("max_workers", 8)),
         )
 
     def run(self, raster: Raster) -> list[Detection]:
-        lon_min, lat_min, lon_max, lat_max = _raster_roi_wgs84(raster)
+        lon_min, lat_min, lon_max, lat_max = raster_roi_wgs84(raster)
 
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         elements = self._fetch_or_load(lon_min, lat_min, lon_max, lat_max)
@@ -213,7 +215,7 @@ class OsmRoadsProcess:
                 continue
 
             geo_bbox = clipped.bounds
-            pixel_bbox = _bbox_to_pixels(geo_bbox, raster)
+            pixel_bbox = bbox_to_pixels(geo_bbox, raster)
             c0, r0, c1, r1 = pixel_bbox
             if c1 < c0 or r1 < r0 or (c1 == c0 and r1 == r0):
                 continue
@@ -262,20 +264,43 @@ class OsmRoadsProcess:
         cache_hits = 0
         cache_misses = 0
 
-        # Dedupe across tiles — adjacent tiles share boundary nodes/ways.
+        # Run cache-hit tiles inline first (no IO, no thread cost) so an all-
+        # cached run stays single-threaded; remaining cache misses fan out
+        # over a small thread pool. Order is preserved when deduping by id.
         merged: dict[tuple[str, int], dict[str, Any]] = {}
-        for i, (s, w, n, e) in enumerate(tiles, start=1):
-            cache_path = self._tile_cache_path(s, w, n, e)
-            had_cache = cache_path.exists()
-            elements = self._fetch_or_load_tile(s, w, n, e, i, len(tiles))
-            if had_cache or elements:
-                cache_hits += 1
+        cached_tiles: list[tuple[int, tuple[float, float, float, float]]] = []
+        miss_tiles: list[tuple[int, tuple[float, float, float, float]]] = []
+        for i, tile in enumerate(tiles, start=1):
+            if self._tile_cache_path(*tile).exists():
+                cached_tiles.append((i, tile))
             else:
-                cache_misses += 1
+                miss_tiles.append((i, tile))
+
+        for i, (s, w, n, e) in cached_tiles:
+            elements = self._fetch_or_load_tile(s, w, n, e, i, len(tiles))
+            cache_hits += 1
             for el in elements:
                 key = (el.get("type", ""), int(el.get("id", 0)))
-                if key not in merged:
-                    merged[key] = el
+                merged.setdefault(key, el)
+
+        if miss_tiles:
+            workers = max(1, min(self.max_workers, len(miss_tiles)))
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                futures = {
+                    pool.submit(
+                        self._fetch_or_load_tile, s, w, n, e, i, len(tiles),
+                    ): i
+                    for i, (s, w, n, e) in miss_tiles
+                }
+                for fut in as_completed(futures):
+                    elements = fut.result()
+                    if elements:
+                        cache_hits += 1
+                    else:
+                        cache_misses += 1
+                    for el in elements:
+                        key = (el.get("type", ""), int(el.get("id", 0)))
+                        merged.setdefault(key, el)
 
         if self._offline:
             _log.info(
@@ -351,7 +376,14 @@ class OsmRoadsProcess:
             try:
                 with urllib.request.urlopen(req, timeout=self.timeout) as resp:
                     raw = resp.read()
-                cache_path.write_bytes(raw)
+                try:
+                    cache_path.write_bytes(raw)
+                except OSError as cache_exc:
+                    _log.warning(
+                        "osm-roads: failed to write tile cache %s: %s — "
+                        "continuing without cache",
+                        cache_path, cache_exc,
+                    )
                 result = json.loads(raw)
                 elements: list[dict[str, Any]] = result.get("elements", [])
                 _log.info(
@@ -403,8 +435,7 @@ def _is_offline_error(exc: BaseException) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Geo helpers (mirrors msft_footprints — kept local to avoid shared-state
-# coupling between process modules)
+# Geo helpers
 # ---------------------------------------------------------------------------
 
 def _tile_bbox(
@@ -439,49 +470,6 @@ def _tile_bbox(
             e = lon_min + (i + 1) * dx if i < nx - 1 else lon_max
             tiles.append((s, w, n, e))
     return tiles
-
-
-def _raster_roi_wgs84(raster: Raster) -> tuple[float, float, float, float]:
-    """Return (lon_min, lat_min, lon_max, lat_max) for the raster footprint."""
-    if raster.aoi_geom is not None and raster.crs.upper() in (
-        "EPSG:4326",
-        "OGC:CRS84",
-    ):
-        minx, miny, maxx, maxy = raster.aoi_geom.bounds
-        return (minx, miny, maxx, maxy)
-
-    a = raster.transform
-    left, top = a.c, a.f
-    right = a.c + a.a * raster.width
-    bottom = a.f + a.e * raster.height
-    minx, maxx = sorted((left, right))
-    miny, maxy = sorted((bottom, top))
-
-    if raster.crs.upper() in ("EPSG:4326", "OGC:CRS84"):
-        return (minx, miny, maxx, maxy)
-    return tuple(  # type: ignore[return-value]
-        transform_bounds(raster.crs, "EPSG:4326", minx, miny, maxx, maxy)
-    )
-
-
-def _bbox_to_pixels(
-    bbox: tuple[float, float, float, float],
-    raster: Raster,
-) -> tuple[int, int, int, int]:
-    """Convert a WGS84 bbox to pixel (col_min, row_min, col_max, row_max).
-
-    Reprojects to the raster's native CRS first when necessary.
-    """
-    minx, miny, maxx, maxy = bbox
-    if raster.crs.upper() not in ("EPSG:4326", "OGC:CRS84"):
-        minx, miny, maxx, maxy = transform_bounds(
-            "EPSG:4326", raster.crs, minx, miny, maxx, maxy
-        )
-    r1, c1 = rowcol(raster.transform, minx, maxy)
-    r2, c2 = rowcol(raster.transform, maxx, miny)
-    row_min, row_max = sorted((int(r1), int(r2)))
-    col_min, col_max = sorted((int(c1), int(c2)))
-    return (col_min, row_min, col_max, row_max)
 
 
 register("osm-roads", OsmRoadsProcess.from_spec)

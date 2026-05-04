@@ -151,7 +151,7 @@ def test_default_output_when_unspecified():
         output_override=None,
         processes_override=json.dumps([{"name": "msft-buildings"}]),
     )
-    assert job.output == Path("./output2")
+    assert job.output == Path("./output")
 
 
 def test_example_job_file_parses():

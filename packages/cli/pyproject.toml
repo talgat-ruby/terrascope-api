@@ -5,7 +5,6 @@ description = "Terrascope cli — per-process pipeline (experimental)"
 requires-python = ">=3.14"
 dependencies = [
     "terrascope-core",
-    "terrascope-core",
     "typer>=0.12",
     "shapely>=2.0",
 ]
